@@ -1,0 +1,11 @@
+torch
+transformers
+sounddevice
+numpy
+fastapi
+uvicorn
+websockets
+jinja2
+protobuf
+sentencepiece
+webrtcvad
