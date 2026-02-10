@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none">
+  <rect width="200" height="200" rx="16" fill="#16161f"/>
+  <rect x="30" y="30" width="50" height="50" rx="4" stroke="#6366f1" stroke-width="4"/>
+  <rect x="120" y="30" width="50" height="50" rx="4" stroke="#6366f1" stroke-width="4"/>
+  <rect x="30" y="120" width="50" height="50" rx="4" stroke="#6366f1" stroke-width="4"/>
+  <rect x="40" y="40" width="30" height="30" rx="2" fill="#6366f1"/>
+  <rect x="130" y="40" width="30" height="30" rx="2" fill="#6366f1"/>
+  <rect x="40" y="130" width="30" height="30" rx="2" fill="#6366f1"/>
+  <rect x="120" y="120" width="8" height="8" fill="#6366f1"/>
+  <rect x="135" y="120" width="8" height="8" fill="#6366f1"/>
+  <rect x="150" y="120" width="8" height="8" fill="#6366f1"/>
+  <rect x="120" y="135" width="8" height="8" fill="#6366f1"/>
+  <rect x="150" y="135" width="8" height="8" fill="#6366f1"/>
+  <rect x="120" y="150" width="8" height="8" fill="#6366f1"/>
+  <rect x="135" y="150" width="8" height="8" fill="#6366f1"/>
+  <rect x="150" y="150" width="8" height="8" fill="#6366f1"/>
+  <text x="100" y="195" text-anchor="middle" fill="#8888a0" font-size="10" font-family="system-ui">QR code will be generated</text>
+</svg>
