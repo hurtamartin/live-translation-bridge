@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Live Preklad</title>
+  <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <header class="admin-header">
+    <h1 class="admin-header__title">Admin Panel</h1>
+    <div class="admin-header__actions">
+      <a href="/" class="admin-header__link">Hlavni stranka</a>
+      <button class="header__btn" id="themeToggle" aria-label="Toggle theme">
+        <span class="header__icon" id="themeIcon">&#9790;</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="admin-main">
+    <!-- A) Status Dashboard -->
+    <section class="admin-card">
+      <h2 class="admin-card__title">Status</h2>
+      <div class="status-grid" id="statusGrid">
+        <div class="status-item">
+          <span class="status-item__dot" id="dotModel"></span>
+          <div>
+            <div class="status-item__label">Model</div>
+            <div class="status-item__detail" id="detailModel">--</div>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-item__dot" id="dotVad"></span>
+          <div>
+            <div class="status-item__label">VAD</div>
+            <div class="status-item__detail" id="detailVad">--</div>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-item__dot" id="dotAudio"></span>
+          <div>
+            <div class="status-item__label">Audio Stream</div>
+            <div class="status-item__detail" id="detailAudio">--</div>
+          </div>
+        </div>
+        <div class="status-item">
+          <span class="status-item__dot" id="dotInference"></span>
+          <div>
+            <div class="status-item__label">Inference</div>
+            <div class="status-item__detail" id="detailInference">--</div>
+          </div>
+        </div>
+      </div>
+      <div class="status-info" id="statusInfo">
+        <span id="infoClients">Klienti: --</span>
+        <span id="infoLanguages">Jazyky: --</span>
+        <span id="infoDevice">Hardware: --</span>
+        <span id="infoUptime">Uptime: --</span>
+      </div>
+    </section>
+
+    <!-- B) Audio Device -->
+    <section class="admin-card">
+      <h2 class="admin-card__title">Audio zarizeni</h2>
+      <div class="admin-form">
+        <label class="admin-label" for="deviceSelect">Zarizeni</label>
+        <select class="admin-select" id="deviceSelect">
+          <option value="">Nacitam...</option>
+        </select>
+
+        <label class="admin-label" for="channelSelect">Kanal</label>
+        <select class="admin-select" id="channelSelect">
+          <option value="0">1 (Mono)</option>
+        </select>
+
+        <div class="admin-form__actions">
+          <button class="admin-btn admin-btn--primary" id="applyDevice">Pouzit</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- C) Translation Parameters -->
+    <section class="admin-card">
+      <h2 class="admin-card__title">Parametry prekladu</h2>
+      <div class="admin-form">
+        <div class="admin-slider-group">
+          <label class="admin-label">Silence Duration</label>
+          <input type="range" class="admin-slider" id="silenceDuration" min="0.3" max="3.0" step="0.1" value="0.8">
+          <span class="admin-slider__value" id="silenceDurationVal">0.8s</span>
+        </div>
+
+        <div class="admin-slider-group">
+          <label class="admin-label">Min Chunk Duration</label>
+          <input type="range" class="admin-slider" id="minChunkDuration" min="0.5" max="5.0" step="0.1" value="1.5">
+          <span class="admin-slider__value" id="minChunkDurationVal">1.5s</span>
+        </div>
+
+        <div class="admin-slider-group">
+          <label class="admin-label">Max Chunk Duration</label>
+          <input type="range" class="admin-slider" id="maxChunkDuration" min="5.0" max="30.0" step="1.0" value="12.0">
+          <span class="admin-slider__value" id="maxChunkDurationVal">12.0s</span>
+        </div>
+
+        <div class="admin-slider-group">
+          <label class="admin-label">Context Overlap</label>
+          <input type="range" class="admin-slider" id="contextOverlap" min="0.0" max="2.0" step="0.1" value="0.5">
+          <span class="admin-slider__value" id="contextOverlapVal">0.5s</span>
+        </div>
+
+        <div class="admin-slider-group">
+          <label class="admin-label">Default Target Language</label>
+          <select class="admin-select" id="defaultTargetLang">
+            <option value="ces">Czech</option>
+            <option value="eng">English</option>
+            <option value="rus">Russian</option>
+            <option value="ukr">Ukrainian</option>
+            <option value="deu">German</option>
+            <option value="pol">Polish</option>
+          </select>
+        </div>
+
+        <div class="admin-form__actions">
+          <button class="admin-btn admin-btn--secondary" id="resetConfig">Vychozi</button>
+          <span class="save-status" id="configStatus"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- D) Audio Preprocessing -->
+    <section class="admin-card">
+      <h2 class="admin-card__title">Audio preprocessing</h2>
+      <p class="admin-card__desc">Zpracovani vstupniho signalu pred odeslanim do modelu. Zapnete jen to, co potrebujete.</p>
+      <div class="admin-form">
+
+        <!-- Noise Gate -->
+        <div class="preprocess-item">
+          <div class="preprocess-item__header">
+            <label class="preprocess-toggle">
+              <input type="checkbox" id="ppNoiseGate">
+              <span class="preprocess-toggle__label">Noise Gate</span>
+            </label>
+            <span class="preprocess-item__hint">Ztisi audio pod prahem hlasitosti</span>
+          </div>
+          <div class="preprocess-item__settings" id="ppNoiseGateSettings">
+            <div class="admin-slider-group">
+              <label class="admin-label">Threshold</label>
+              <input type="range" class="admin-slider" id="ppNoiseGateThreshold" min="-60" max="-10" step="1" value="-40">
+              <span class="admin-slider__value" id="ppNoiseGateThresholdVal">-40 dB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Normalize -->
+        <div class="preprocess-item">
+          <div class="preprocess-item__header">
+            <label class="preprocess-toggle">
+              <input type="checkbox" id="ppNormalize">
+              <span class="preprocess-toggle__label">Normalizace hlasitosti</span>
+            </label>
+            <span class="preprocess-item__hint">Vyrovnava uroven hlasitosti</span>
+          </div>
+          <div class="preprocess-item__settings" id="ppNormalizeSettings">
+            <div class="admin-slider-group">
+              <label class="admin-label">Target level</label>
+              <input type="range" class="admin-slider" id="ppNormalizeTarget" min="-20" max="0" step="1" value="-3">
+              <span class="admin-slider__value" id="ppNormalizeTargetVal">-3 dB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- High-pass filter -->
+        <div class="preprocess-item">
+          <div class="preprocess-item__header">
+            <label class="preprocess-toggle">
+              <input type="checkbox" id="ppHighpass">
+              <span class="preprocess-toggle__label">High-pass filtr</span>
+            </label>
+            <span class="preprocess-item__hint">Odrizne hluboke frekvence pod reci</span>
+          </div>
+          <div class="preprocess-item__settings" id="ppHighpassSettings">
+            <div class="admin-slider-group">
+              <label class="admin-label">Cutoff</label>
+              <input type="range" class="admin-slider" id="ppHighpassCutoff" min="20" max="300" step="10" value="80">
+              <span class="admin-slider__value" id="ppHighpassCutoffVal">80 Hz</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Auto language detection -->
+        <div class="preprocess-item">
+          <div class="preprocess-item__header">
+            <label class="preprocess-toggle">
+              <input type="checkbox" id="ppAutoLang">
+              <span class="preprocess-toggle__label">Automaticka detekce zdrojoveho jazyka</span>
+            </label>
+            <span class="preprocess-item__hint">Model se pokusi detekovat jazyk reci</span>
+          </div>
+        </div>
+
+        <div class="admin-form__actions">
+          <span class="save-status" id="preprocessStatus"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- E) Real-time Log -->
+    <section class="admin-card admin-card--log">
+      <div class="admin-card__header">
+        <h2 class="admin-card__title">Log</h2>
+        <div>
+          <label class="admin-label--inline">
+            <input type="checkbox" id="logAutoScroll" checked> Auto-scroll
+          </label>
+          <button class="admin-btn admin-btn--small" id="clearLog">Vymazat</button>
+        </div>
+      </div>
+      <div class="log-container" id="logContainer"></div>
+    </section>
+  </main>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>
