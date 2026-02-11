@@ -21,7 +21,7 @@
 
     <div class="header__status" id="statusIndicator">
       <span class="status__dot" id="statusDot"></span>
-      <span class="status__text" id="statusText">Připojování...</span>
+      <span class="status__text" id="statusText"></span>
     </div>
 
     <button class="header__btn" id="settingsToggle" aria-label="Settings">
@@ -33,8 +33,7 @@
   <main class="subtitles" id="subtitlesContainer">
     <div class="subtitles__empty" id="emptyState">
       <div class="empty__icon">&#127908;</div>
-      <p class="empty__text">Čekám na překlad...</p>
-      <p class="empty__hint">Waiting for translation...</p>
+      <p class="empty__text" data-i18n="waitingForTranslation"></p>
     </div>
   </main>
 
@@ -47,21 +46,21 @@
   <!-- Language modal (options built dynamically in app.js) -->
   <div class="modal-overlay" id="langModal">
     <div class="modal">
-      <h2 class="modal__title">Vyberte jazyk / Select language</h2>
+      <h2 class="modal__title" data-i18n="selectLanguage"></h2>
       <div class="modal__options" id="langOptions">
         <!-- Populated by app.js from LANGUAGES config -->
       </div>
-      <button class="modal__close" id="langModalClose">Zavřít</button>
+      <button class="modal__close" id="langModalClose" data-i18n="close"></button>
     </div>
   </div>
 
   <!-- Settings drawer -->
   <div class="modal-overlay" id="settingsModal">
     <div class="modal modal--settings">
-      <h2 class="modal__title">Nastavení / Settings</h2>
+      <h2 class="modal__title" data-i18n="settings"></h2>
 
       <div class="setting">
-        <label class="setting__label" for="fontSizeSlider">Velikost písma</label>
+        <label class="setting__label" for="fontSizeSlider" data-i18n="fontSize"></label>
         <input type="range" class="setting__slider" id="fontSizeSlider" min="16" max="64" value="28">
         <span class="setting__value" id="fontSizeValue">28px</span>
       </div>
@@ -69,12 +68,12 @@
       <div class="setting">
         <label class="setting__label">
           <input type="checkbox" class="setting__checkbox" id="showTimestamps">
-          Zobrazit čas
+          <span data-i18n="showTimestamps"></span>
         </label>
       </div>
 
       <div class="setting">
-        <label class="setting__label" for="maxSubtitles">Počet titulků</label>
+        <label class="setting__label" for="maxSubtitles" data-i18n="subtitleCount"></label>
         <select class="setting__select" id="maxSubtitles">
           <option value="5">5</option>
           <option value="10" selected>10</option>
@@ -83,27 +82,24 @@
       </div>
 
       <div class="setting">
-        <a href="#qr" class="setting__link" id="showQrLink">Zobrazit QR kód</a>
+        <a href="#qr" class="setting__link" id="showQrLink" data-i18n="showQrCode"></a>
       </div>
 
-      <button class="modal__close" id="settingsModalClose">Zavřít</button>
+      <button class="modal__close" id="settingsModalClose" data-i18n="close"></button>
     </div>
   </div>
 
   <!-- QR page overlay -->
   <div class="qr-overlay" id="qrOverlay">
     <div class="qr-page">
-      <h1 class="qr-page__title">Live Překlad</h1>
+      <h1 class="qr-page__title" data-i18n="qrPageTitle"></h1>
       <div class="qr-page__code">
         <img src="/static/assets/qr.png" alt="QR Code" id="qrImage"
              onerror="this.src='/static/assets/qr-placeholder.svg'">
       </div>
-      <p class="qr-page__instruction">
-        Připojte se na Wi-Fi a naskenujte kód<br>
-        Connect to Wi-Fi and scan the code
-      </p>
+      <p class="qr-page__instruction" data-i18n="qrInstruction"></p>
       <p class="qr-page__url" id="pageUrl"></p>
-      <button class="qr-page__close" id="qrClose">Zavřít</button>
+      <button class="qr-page__close" id="qrClose" data-i18n="close"></button>
     </div>
   </div>
 

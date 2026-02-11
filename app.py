@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import sounddevice as sd
 import torch
+import torchaudio
 from transformers import SeamlessM4Tv2ForSpeechToText, AutoProcessor
 from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -112,6 +113,18 @@ stop_event = threading.Event()
 audio_stream = None
 audio_stream_lock = threading.Lock()
 start_time = time.time()
+native_sample_rate = 16000
+resampler = None
+_audio_level_db = -60.0
+_audio_level_lock = threading.Lock()
+
+def compute_audio_level(audio_np: np.ndarray) -> float:
+    """Compute RMS audio level in dB, clamped to -60 dB."""
+    rms = np.sqrt(np.mean(audio_np ** 2))
+    if rms < 1e-10:
+        return -60.0
+    db = 20.0 * np.log10(rms)
+    return float(max(db, -60.0))
 
 # --- DEVICE DETECTION ---
 def detect_device():
@@ -184,6 +197,19 @@ def is_speech(audio_chunk_np: np.ndarray) -> bool:
     confidence = vad_model(tensor, runtime_config["sample_rate"]).item()
     return confidence > 0.5
 
+# --- AUDIO RESAMPLING ---
+def create_resampler(orig_freq: int, new_freq: int = 16000):
+    if orig_freq == new_freq:
+        return None
+    return torchaudio.transforms.Resample(orig_freq=orig_freq, new_freq=new_freq)
+
+def resample_audio(audio_np: np.ndarray, resampler_obj) -> np.ndarray:
+    if resampler_obj is None:
+        return audio_np
+    tensor = torch.from_numpy(audio_np).float().unsqueeze(0)
+    resampled = resampler_obj(tensor)
+    return resampled.squeeze(0).numpy()
+
 # --- AUDIO PREPROCESSING ---
 def preprocess_audio(audio_np: np.ndarray) -> np.ndarray:
     """Apply enabled preprocessing steps to audio before translation."""
@@ -242,7 +268,7 @@ def detect_source_language(audio_np: np.ndarray) -> str | None:
                   for k, v in inputs.items()}
         with torch.no_grad():
             # Generate with English target just to get encoder output, then check predicted language
-            output = model.generate(**inputs, tgt_lang="eng", generate_speech=False,
+            output = model.generate(**inputs, tgt_lang="eng",
                                      return_dict_in_generate=True, output_scores=True)
         # The model's src_lang is set during processing
         src_lang = getattr(processor, '_src_lang', None)
@@ -278,7 +304,7 @@ def translate_audio(audio_np: np.ndarray, target_langs: list[str]) -> dict[str, 
     with torch.no_grad():
         for lang in target_langs:
             try:
-                output_tokens = model.generate(**inputs, tgt_lang=lang, generate_speech=False)
+                output_tokens = model.generate(**inputs, tgt_lang=lang)
                 text = processor.decode(output_tokens[0].tolist(), skip_special_tokens=True).strip()
                 text = text.replace("#err", "")
                 if text:
@@ -364,7 +390,7 @@ def audio_callback(indata, frames, time_info, status):
 
 def restart_audio_stream(device_index=None, channel=0):
     """Restart audio stream with new device/channel settings."""
-    global audio_stream
+    global audio_stream, native_sample_rate, resampler
     with audio_stream_lock:
         if audio_stream is not None:
             try:
@@ -375,14 +401,26 @@ def restart_audio_stream(device_index=None, channel=0):
                 logger.warning(f"Error stopping audio stream: {e}")
             audio_stream = None
 
-        sr = runtime_config["sample_rate"]
-        # Determine number of channels to open
+        # Determine native sample rate of the device
         if device_index is not None:
-            devices = sd.query_devices()
-            max_ch = devices[device_index]['max_input_channels']
-            channels_to_open = max_ch  # Open all channels, we'll pick one
+            dev_info = sd.query_devices(device_index)
+            native_sr = int(dev_info['default_samplerate'])
+            max_ch = dev_info['max_input_channels']
+            channels_to_open = max_ch
         else:
-            channels_to_open = 1  # Default device, single channel
+            dev_info = sd.query_devices(kind='input')
+            native_sr = int(dev_info['default_samplerate'])
+            channels_to_open = 1
+
+        native_sample_rate = native_sr
+
+        # Create resampler if needed (native -> 16kHz)
+        target_sr = runtime_config["sample_rate"]
+        resampler = create_resampler(native_sr, target_sr)
+        if resampler is not None:
+            logger.info(f"Resampling active: {native_sr} Hz -> {target_sr} Hz")
+        else:
+            logger.info(f"No resampling needed: device already at {native_sr} Hz")
 
         # If channel > 0, we need to open enough channels
         if channel > 0:
@@ -403,19 +441,19 @@ def restart_audio_stream(device_index=None, channel=0):
                 audio_stream = sd.InputStream(
                     device=device_index,
                     channels=channels_to_open,
-                    samplerate=sr,
+                    samplerate=native_sr,
                     callback=multi_channel_callback,
                 )
             else:
                 audio_stream = sd.InputStream(
                     device=device_index,
                     channels=1,
-                    samplerate=sr,
+                    samplerate=native_sr,
                     callback=audio_callback,
                 )
             audio_stream.start()
             dev_name = "default" if device_index is None else sd.query_devices(device_index)['name']
-            logger.info(f"Audio stream started: device={dev_name}, channel={channel}")
+            logger.info(f"Audio stream started: device={dev_name}, channel={channel}, native_sr={native_sr}")
         except Exception as e:
             logger.error(f"Failed to start audio stream: {e}")
             audio_stream = None
@@ -433,25 +471,46 @@ def submit_translation(audio_np, target_langs, loop):
 
 def processing_loop(loop):
     buffer = []
+    vad_buffer = np.array([], dtype=np.float32)
     prev_audio = np.array([], dtype=np.float32)
     silence_start = None
     is_speaking = False
+    VAD_MIN_SAMPLES = 512  # Minimum samples needed for Silero VAD at 16kHz
 
     while not stop_event.is_set():
         try:
             chunk = audio_queue.get(timeout=0.1)
-            buffer.append(chunk)
             chunk_np = np.concatenate(chunk).flatten()
 
-            # Silero VAD
-            speech_detected = is_speech(chunk_np)
+            # Resample to 16kHz if needed
+            chunk_np = resample_audio(chunk_np, resampler)
 
-            sr = runtime_config["sample_rate"]
+            # Compute audio level for VU meter
+            global _audio_level_db
+            level = compute_audio_level(chunk_np)
+            with _audio_level_lock:
+                _audio_level_db = level
+
+            buffer.append(chunk_np)
+
+            # Accumulate samples for VAD (needs exactly 512 samples at 16kHz)
+            vad_buffer = np.concatenate((vad_buffer, chunk_np))
+            speech_detected = is_speaking  # default: keep previous state
+
+            # Process all complete 512-sample frames in the VAD buffer
+            while vad_buffer.shape[0] >= VAD_MIN_SAMPLES:
+                vad_chunk = vad_buffer[:VAD_MIN_SAMPLES]
+                vad_buffer = vad_buffer[VAD_MIN_SAMPLES:]
+                speech_detected = is_speech(vad_chunk)
+
+            sr = runtime_config["sample_rate"]  # 16kHz (after resampling)
             total_frames = sum(c.shape[0] for c in buffer)
             total_duration = total_frames / sr
             current_time = time.time()
 
             if speech_detected:
+                # if not is_speaking:
+                #     logger.debug(f"Speech started (buffer: {total_duration:.1f}s)")
                 is_speaking = True
                 silence_start = None
             else:
@@ -472,7 +531,7 @@ def processing_loop(loop):
                 should_process = True
 
             if should_process and total_duration >= min_chunk:
-                full_audio = np.concatenate([c.flatten() for c in buffer]).astype(np.float32)
+                full_audio = np.concatenate(buffer).astype(np.float32)
 
                 # Prepend context from previous segment
                 audio_to_process = full_audio
@@ -482,7 +541,10 @@ def processing_loop(loop):
                 # Get unique languages from connected clients
                 target_langs = manager.get_unique_languages()
                 if target_langs:
+                    # logger.info(f"Submitting translation: {total_duration:.1f}s audio -> {target_langs}")
                     inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
+                else:
+                    pass  # no connected clients
 
                 # Save context overlap for next segment
                 samples_ctx = int(sr * ctx_overlap)
@@ -528,7 +590,13 @@ async def api_status():
         if audio_stream is not None and audio_stream.active:
             dev_idx = runtime_config["audio_device_index"]
             dev_name = "default" if dev_idx is None else sd.query_devices(dev_idx)['name']
-            audio_status = {"status": "running", "device_name": dev_name, "channel": runtime_config["audio_channel"]}
+            audio_status = {
+                "status": "running",
+                "device_name": dev_name,
+                "channel": runtime_config["audio_channel"],
+                "native_sample_rate": native_sample_rate,
+                "resampling_active": resampler is not None,
+            }
         else:
             audio_status = {"status": "stopped", "device_name": None, "channel": 0}
 
@@ -537,9 +605,13 @@ async def api_status():
     if device.type == "cuda":
         gpu_name = torch.cuda.get_device_name(0)
 
+    with _audio_level_lock:
+        current_audio_level = _audio_level_db
+
     return JSONResponse({
         "status": "ok",
         "clients": manager.client_count(),
+        "audio_level_db": round(current_audio_level, 1),
         "active_languages": sorted(manager.get_unique_languages()),
         "device": device.type,
         "uptime": int(time.time() - start_time),

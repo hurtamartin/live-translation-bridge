@@ -17,6 +17,111 @@ const LANGUAGES = [
   { code: 'pol', label: 'PL', flag: '\u{1F1F5}\u{1F1F1}', name: 'Polski',   desc: 'Polish' },
 ];
 
+const TRANSLATIONS = {
+  ces: {
+    waitingForTranslation: '\u010Cek\u00e1m na p\u0159eklad...',
+    connecting: 'P\u0159ipojov\u00e1n\u00ed...',
+    live: 'LIVE',
+    disconnected: 'Odpojeno',
+    disconnectedTimer: 'Odpojeno ({0}s)',
+    selectLanguage: 'Vyberte jazyk',
+    close: 'Zav\u0159\u00edt',
+    settings: 'Nastaven\u00ed',
+    fontSize: 'Velikost p\u00edsma',
+    showTimestamps: 'Zobrazit \u010das',
+    subtitleCount: 'Po\u010det titulk\u016f',
+    showQrCode: 'Zobrazit QR k\u00f3d',
+    qrPageTitle: 'Live P\u0159eklad',
+    qrInstruction: 'P\u0159ipojte se na Wi-Fi a naskenujte k\u00f3d',
+    pageTitle: 'Live P\u0159eklad',
+  },
+  eng: {
+    waitingForTranslation: 'Waiting for translation...',
+    connecting: 'Connecting...',
+    live: 'LIVE',
+    disconnected: 'Disconnected',
+    disconnectedTimer: 'Disconnected ({0}s)',
+    selectLanguage: 'Select language',
+    close: 'Close',
+    settings: 'Settings',
+    fontSize: 'Font size',
+    showTimestamps: 'Show timestamps',
+    subtitleCount: 'Subtitle count',
+    showQrCode: 'Show QR code',
+    qrPageTitle: 'Live Translation',
+    qrInstruction: 'Connect to Wi-Fi and scan the code',
+    pageTitle: 'Live Translation',
+  },
+  rus: {
+    waitingForTranslation: '\u041E\u0436\u0438\u0434\u0430\u043D\u0438\u0435 \u043F\u0435\u0440\u0435\u0432\u043E\u0434\u0430...',
+    connecting: '\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435...',
+    live: 'LIVE',
+    disconnected: '\u041E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u043E',
+    disconnectedTimer: '\u041E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u043E ({0}\u0441)',
+    selectLanguage: '\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u044F\u0437\u044B\u043A',
+    close: '\u0417\u0430\u043A\u0440\u044B\u0442\u044C',
+    settings: '\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438',
+    fontSize: '\u0420\u0430\u0437\u043C\u0435\u0440 \u0448\u0440\u0438\u0444\u0442\u0430',
+    showTimestamps: '\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C \u0432\u0440\u0435\u043C\u044F',
+    subtitleCount: '\u041A\u043E\u043B-\u0432\u043E \u0441\u0443\u0431\u0442\u0438\u0442\u0440\u043E\u0432',
+    showQrCode: '\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u044C QR \u043A\u043E\u0434',
+    qrPageTitle: 'Live \u041F\u0435\u0440\u0435\u0432\u043E\u0434',
+    qrInstruction: '\u041F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u0435\u0441\u044C \u043A Wi-Fi \u0438 \u043E\u0442\u0441\u043A\u0430\u043D\u0438\u0440\u0443\u0439\u0442\u0435 \u043A\u043E\u0434',
+    pageTitle: 'Live \u041F\u0435\u0440\u0435\u0432\u043E\u0434',
+  },
+  ukr: {
+    waitingForTranslation: '\u041E\u0447\u0456\u043A\u0443\u0432\u0430\u043D\u043D\u044F \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0443...',
+    connecting: '\u041F\u0456\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043D\u044F...',
+    live: 'LIVE',
+    disconnected: '\u0412\u0456\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043E',
+    disconnectedTimer: '\u0412\u0456\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u043E ({0}\u0441)',
+    selectLanguage: '\u041E\u0431\u0435\u0440\u0456\u0442\u044C \u043C\u043E\u0432\u0443',
+    close: '\u0417\u0430\u043A\u0440\u0438\u0442\u0438',
+    settings: '\u041D\u0430\u043B\u0430\u0448\u0442\u0443\u0432\u0430\u043D\u043D\u044F',
+    fontSize: '\u0420\u043E\u0437\u043C\u0456\u0440 \u0448\u0440\u0438\u0444\u0442\u0443',
+    showTimestamps: '\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u0438 \u0447\u0430\u0441',
+    subtitleCount: '\u041A\u0456\u043B\u044C\u043A\u0456\u0441\u0442\u044C \u0441\u0443\u0431\u0442\u0438\u0442\u0440\u0456\u0432',
+    showQrCode: '\u041F\u043E\u043A\u0430\u0437\u0430\u0442\u0438 QR \u043A\u043E\u0434',
+    qrPageTitle: 'Live \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434',
+    qrInstruction: '\u041F\u0456\u0434\u043A\u043B\u044E\u0447\u0456\u0442\u044C\u0441\u044F \u0434\u043E Wi-Fi \u0442\u0430 \u0432\u0456\u0434\u0441\u043A\u0430\u043D\u0443\u0439\u0442\u0435 \u043A\u043E\u0434',
+    pageTitle: 'Live \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434',
+  },
+  deu: {
+    waitingForTranslation: 'Warte auf \u00dcbersetzung...',
+    connecting: 'Verbindung wird hergestellt...',
+    live: 'LIVE',
+    disconnected: 'Getrennt',
+    disconnectedTimer: 'Getrennt ({0}s)',
+    selectLanguage: 'Sprache w\u00e4hlen',
+    close: 'Schlie\u00dfen',
+    settings: 'Einstellungen',
+    fontSize: 'Schriftgr\u00f6\u00dfe',
+    showTimestamps: 'Zeitstempel anzeigen',
+    subtitleCount: 'Untertitelanzahl',
+    showQrCode: 'QR-Code anzeigen',
+    qrPageTitle: 'Live \u00dcbersetzung',
+    qrInstruction: 'Verbinden Sie sich mit dem WLAN und scannen Sie den Code',
+    pageTitle: 'Live \u00dcbersetzung',
+  },
+  pol: {
+    waitingForTranslation: 'Oczekiwanie na t\u0142umaczenie...',
+    connecting: '\u0141\u0105czenie...',
+    live: 'LIVE',
+    disconnected: 'Roz\u0142\u0105czono',
+    disconnectedTimer: 'Roz\u0142\u0105czono ({0}s)',
+    selectLanguage: 'Wybierz j\u0119zyk',
+    close: 'Zamknij',
+    settings: 'Ustawienia',
+    fontSize: 'Rozmiar czcionki',
+    showTimestamps: 'Poka\u017c czas',
+    subtitleCount: 'Liczba napisy',
+    showQrCode: 'Poka\u017c kod QR',
+    qrPageTitle: 'Live T\u0142umaczenie',
+    qrInstruction: 'Po\u0142\u0105cz si\u0119 z Wi-Fi i zeskanuj kod',
+    pageTitle: 'Live T\u0142umaczenie',
+  },
+};
+
 const CONFIG = {
   RECONNECT_BASE: 1000,
   RECONNECT_MAX: 30000,
@@ -71,6 +176,40 @@ function getLangInfo(code) {
   return LANGUAGES.find(function(l) { return l.code === code; }) || { code: code, label: code.toUpperCase(), flag: '', name: code, desc: '' };
 }
 
+function t(key) {
+  var lang = state.language;
+  if (TRANSLATIONS[lang] && TRANSLATIONS[lang][key]) {
+    return TRANSLATIONS[lang][key];
+  }
+  // Fallback to Czech
+  if (TRANSLATIONS.ces && TRANSLATIONS.ces[key]) {
+    return TRANSLATIONS.ces[key];
+  }
+  return key;
+}
+
+/* ========== i18n ========== */
+
+function updateUILanguage() {
+  // Update all elements with data-i18n attribute
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n');
+    el.textContent = t(key);
+  });
+
+  // Update page title
+  document.title = t('pageTitle');
+
+  // Update status text based on current connection state
+  if (state.connected) {
+    setStatus('live');
+  } else if (state.reconnectTimer) {
+    // Keep current reconnect text
+  } else {
+    setStatus('connecting');
+  }
+}
+
 /* ========== Theme ========== */
 
 function applyTheme() {
@@ -96,14 +235,14 @@ function setStatus(status, text) {
   switch (status) {
     case 'live':
       dom.statusDot.classList.add('status__dot--live');
-      dom.statusText.textContent = text || 'LIVE';
+      dom.statusText.textContent = text || t('live');
       break;
     case 'error':
       dom.statusDot.classList.add('status__dot--error');
-      dom.statusText.textContent = text || 'Odpojeno';
+      dom.statusText.textContent = text || t('disconnected');
       break;
     default:
-      dom.statusText.textContent = text || 'P\u0159ipojov\u00e1n\u00ed...';
+      dom.statusText.textContent = text || t('connecting');
   }
 }
 
@@ -171,7 +310,7 @@ function scheduleReconnect() {
 
   var delay = state.reconnectDelay;
   var delaySec = Math.round(delay / 1000);
-  setStatus('error', 'Odpojeno (' + delaySec + 's)');
+  setStatus('error', t('disconnectedTimer').replace('{0}', delaySec));
 
   state.reconnectTimer = setTimeout(function() {
     state.reconnectTimer = null;
@@ -201,6 +340,9 @@ function changeLanguage(langCode) {
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify({ type: 'set_lang', lang: langCode }));
   }
+
+  // Update UI language
+  updateUILanguage();
 }
 
 /* ========== Subtitles ========== */
@@ -224,12 +366,6 @@ function addSubtitle(text) {
   // Meta line
   var meta = document.createElement('div');
   meta.className = 'subtitle__meta';
-
-  var langTag = document.createElement('span');
-  langTag.className = 'subtitle__lang-tag';
-  var info = getLangInfo(state.language);
-  langTag.textContent = info.label;
-  meta.appendChild(langTag);
 
   var timeEl = document.createElement('span');
   timeEl.className = 'subtitle__time' + (state.showTimestamps ? ' subtitle__time--visible' : '');
@@ -419,6 +555,7 @@ function init() {
   buildLanguageOptions();
   applyTheme();
   applySettings();
+  updateUILanguage();
   initEventListeners();
   registerServiceWorker();
   connect();

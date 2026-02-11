@@ -57,6 +57,9 @@ var dom = {
   ppHighpassCutoffVal: document.getElementById('ppHighpassCutoffVal'),
   ppAutoLang: document.getElementById('ppAutoLang'),
   preprocessStatus: document.getElementById('preprocessStatus'),
+  // VU Meter
+  audioMeterBar: document.getElementById('audioMeterBar'),
+  audioMeterValue: document.getElementById('audioMeterValue'),
   // Log
   logContainer: document.getElementById('logContainer'),
   logAutoScroll: document.getElementById('logAutoScroll'),
@@ -178,6 +181,15 @@ function fetchStatus() {
       dom.infoLanguages.textContent = 'Jazyky: ' + (data.active_languages.length > 0 ? data.active_languages.join(', ') : '--');
       dom.infoDevice.textContent = 'Hardware: ' + data.device.toUpperCase();
       dom.infoUptime.textContent = 'Uptime: ' + formatUptime(data.uptime);
+
+      // VU Meter
+      if (data.audio_level_db !== undefined) {
+        var db = data.audio_level_db;
+        var pct = Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+        dom.audioMeterBar.style.width = pct + '%';
+        dom.audioMeterValue.textContent = db.toFixed(1) + ' dB';
+      }
+
       // NOTE: config is NOT synced here — only on initial load
     })
     .catch(function(err) {
