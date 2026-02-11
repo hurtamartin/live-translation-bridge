@@ -1,239 +1,112 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="cs">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live Translation</title>
-    <style>
-        :root {
-            --sentence-font-size: 2rem;
-        }
-
-        body {
-            background-color: #000000;
-            color: #FFFFFF;
-            font-family: Arial, Helvetica, sans-serif;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            flex-direction: column;
-            justify-content: flex-end;
-            height: 100vh;
-            box-sizing: border-box;
-            overflow: hidden;
-        }
-
-        #content {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-
-        .sentence {
-            font-size: var(--sentence-font-size);
-            line-height: 1.3;
-            opacity: 0;
-            transform: translateY(20px);
-            animation: fadeUp 1s forwards;
-        }
-
-        /* Latest sentence brightest */
-        .sentence:last-child {
-            color: #FFFFFF;
-        }
-        .sentence:nth-last-child(2) { color: #DDDDDD; }
-        .sentence:nth-last-child(3) { color: #BBBBBB; }
-        .sentence:nth-last-child(4) { color: #999999; }
-        .sentence:nth-last-child(5) { color: #777777; }
-
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Smooth scroll up when new sentence arrives */
-        #content {
-            transition: transform 1.6s ease;
-        }
-
-        #status {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background-color: red;
-        }
-        #status.connected {
-            background-color: green;
-        }
-
-        #controls {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            display: flex;
-            gap: 10px;
-            opacity: 0.3;
-            transition: opacity 0.3s;
-            z-index: 1000;
-        }
-        #controls:hover {
-            opacity: 1;
-        }
-        .control-btn {
-            background: #333;
-            color: white;
-            border: 1px solid #555;
-            width: 40px;
-            height: 40px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 1.2rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            user-select: none;
-        }
-        .control-btn:hover {
-            background: #555;
-        }
-        .control-btn:active {
-            background: #777;
-        }
-
-        .lang-select {
-            background: #333;
-            color: white;
-            border: 1px solid #555;
-            height: 40px;
-            border-radius: 5px;
-            padding: 0 10px;
-            font-size: 1rem;
-            cursor: pointer;
-        }
-        .lang-select:hover {
-            background: #555;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0f" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f8f9fc" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Live Překlad</title>
+  <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <div id="status" title="Connection Status"></div>
-    <div id="controls">
-        <select id="langSelect" class="lang-select" onchange="changeLanguage(this.value)">
-            <option value="rus">Russian (RU)</option>
-            <option value="ukr">Ukrainian (UA)</option>
-            <option value="ces">Czech (CZ)</option>
-            <option value="eng">English (EN)</option>
-            <option value="deu">German (DE)</option>
-            <option value="pol">Polish (PL)</option>
+  <!-- Header -->
+  <header class="header" id="header">
+    <button class="header__btn" id="themeToggle" aria-label="Toggle theme">
+      <span class="header__icon" id="themeIcon">&#9790;</span>
+    </button>
+
+    <div class="header__status" id="statusIndicator">
+      <span class="status__dot" id="statusDot"></span>
+      <span class="status__text" id="statusText"></span>
+    </div>
+
+    <button class="header__btn" id="settingsToggle" aria-label="Settings">
+      <span class="header__icon">&#9881;</span>
+    </button>
+  </header>
+
+  <!-- Subtitles container -->
+  <main class="subtitles" id="subtitlesContainer">
+    <div class="subtitles__empty" id="emptyState">
+      <div class="empty__icon">&#127908;</div>
+      <p class="empty__text" data-i18n="waitingForTranslation"></p>
+    </div>
+  </main>
+
+  <!-- Language selector FAB -->
+  <button class="fab" id="langFab" aria-label="Change language">
+    <span class="fab__icon">&#127760;</span>
+    <span class="fab__label" id="fabLabel">CZ</span>
+  </button>
+
+  <!-- Language modal (options built dynamically in app.js) -->
+  <div class="modal-overlay" id="langModal">
+    <div class="modal">
+      <h2 class="modal__title" data-i18n="selectLanguage"></h2>
+      <div class="modal__options" id="langOptions">
+        <!-- Populated by app.js from LANGUAGES config -->
+      </div>
+      <button class="modal__close" id="langModalClose" data-i18n="close"></button>
+    </div>
+  </div>
+
+  <!-- Settings drawer -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal modal--settings">
+      <h2 class="modal__title" data-i18n="settings"></h2>
+
+      <div class="setting">
+        <label class="setting__label" for="fontSizeSlider" data-i18n="fontSize"></label>
+        <input type="range" class="setting__slider" id="fontSizeSlider" min="16" max="64" value="28">
+        <span class="setting__value" id="fontSizeValue">28px</span>
+      </div>
+
+      <div class="setting">
+        <label class="setting__label">
+          <input type="checkbox" class="setting__checkbox" id="showTimestamps">
+          <span data-i18n="showTimestamps"></span>
+        </label>
+      </div>
+
+      <div class="setting">
+        <label class="setting__label" for="maxSubtitles" data-i18n="subtitleCount"></label>
+        <select class="setting__select" id="maxSubtitles">
+          <option value="5">5</option>
+          <option value="10" selected>10</option>
+          <option value="20">20</option>
         </select>
-        <div class="control-btn" onclick="adjustFontSize(0.2)" title="Increase Font Size">+</div>
-        <div class="control-btn" onclick="adjustFontSize(-0.2)" title="Decrease Font Size">-</div>
+      </div>
+
+      <div class="setting">
+        <a href="#qr" class="setting__link" id="showQrLink" data-i18n="showQrCode"></a>
+      </div>
+
+      <button class="modal__close" id="settingsModalClose" data-i18n="close"></button>
     </div>
-    <div id="content">
-        <!-- Sentences appear here -->
+  </div>
+
+  <!-- QR page overlay -->
+  <div class="qr-overlay" id="qrOverlay">
+    <div class="qr-page">
+      <h1 class="qr-page__title" data-i18n="qrPageTitle"></h1>
+      <div class="qr-page__code">
+        <img src="/static/assets/qr.png" alt="QR Code" id="qrImage"
+             onerror="this.src='/static/assets/qr-placeholder.svg'">
+      </div>
+      <p class="qr-page__instruction" data-i18n="qrInstruction"></p>
+      <p class="qr-page__url" id="pageUrl"></p>
+      <button class="qr-page__close" id="qrClose" data-i18n="close"></button>
     </div>
+  </div>
 
-    <script>
-        const contentDiv = document.getElementById('content');
-        const statusDiv = document.getElementById('status');
-        const langSelect = document.getElementById('langSelect');
-        const MAX_SENTENCES = 5;
-        let ws = null;
-
-        // Initialize language from server template variable
-        const serverLang = "{{ target_lang }}";
-        if (serverLang && langSelect.querySelector(`option[value="${serverLang}"]`)) {
-            langSelect.value = serverLang;
-        }
-
-        // Font size logic
-        let currentFontSize = 2.0;
-        const savedSize = localStorage.getItem('preferredFontSize');
-        if (savedSize) {
-            currentFontSize = parseFloat(savedSize);
-            document.documentElement.style.setProperty('--sentence-font-size', `${currentFontSize}rem`);
-        }
-
-        function adjustFontSize(delta) {
-            currentFontSize += delta;
-            // Clamp value to reasonable limits (e.g., 0.5rem to 10rem)
-            if (currentFontSize < 0.5) currentFontSize = 0.5;
-            if (currentFontSize > 10.0) currentFontSize = 10.0;
-            
-            // Round to 1 decimal place to avoid floating point weirdness
-            currentFontSize = Math.round(currentFontSize * 10) / 10;
-            
-            document.documentElement.style.setProperty('--sentence-font-size', `${currentFontSize}rem`);
-            localStorage.setItem('preferredFontSize', currentFontSize);
-        }
-
-        function changeLanguage(lang) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "set_lang", lang: lang }));
-                console.log("Requested language change to:", lang);
-            } else {
-                console.warn("WebSocket not connected, cannot change language");
-            }
-        }
-
-        function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-            ws.onopen = () => {
-                statusDiv.classList.add('connected');
-                console.log('Connected to server');
-            };
-
-            ws.onmessage = (event) => {
-                const text = event.data;
-                addSentence(text);
-            };
-
-            ws.onclose = () => {
-                statusDiv.classList.remove('connected');
-                console.log('Disconnected. Reconnecting in 2 seconds...');
-                setTimeout(connect, 2000);
-            };
-
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                ws.close();
-            };
-        }
-
-        function addSentence(text) {
-            const div = document.createElement('div');
-            div.className = 'sentence';
-            div.textContent = text;
-            contentDiv.appendChild(div);
-
-            // Calculate height of the new element + gap to determine how much the content shifted up
-            const style = getComputedStyle(contentDiv);
-            const gap = contentDiv.children.length > 1 ? parseInt(style.rowGap || 0) : 0;
-            const shiftAmount = div.offsetHeight + gap;
-
-            // Instantly shift down to counteract the layout shift
-            contentDiv.style.transition = 'none';
-            contentDiv.style.transform = `translateY(${shiftAmount}px)`;
-
-            // Keep only MAX_SENTENCES
-            while (contentDiv.children.length > MAX_SENTENCES) {
-                contentDiv.removeChild(contentDiv.firstElementChild);
-            }
-
-            // Force reflow
-            void contentDiv.offsetHeight;
-
-            // Animate smoothly to new position (0px)
-            contentDiv.style.transition = 'transform 1.6s ease';
-            contentDiv.style.transform = 'translateY(0)';
-        }
-
-        connect();
-    </script>
+  <script>
+    // Show the current page URL in QR section
+    document.getElementById('pageUrl').textContent = window.location.origin;
+  </script>
+  <script src="/static/app.js"></script>
 </body>
 </html>
