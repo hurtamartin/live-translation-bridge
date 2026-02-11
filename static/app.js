@@ -137,8 +137,17 @@ function connect() {
   };
 
   state.ws.onmessage = function(event) {
-    // Backend sends plain text (translated sentence)
-    var text = event.data;
+    // Backend sends JSON {"type":"subtitle","text":"..."} or plain text (fallback)
+    var text = '';
+    try {
+      var data = JSON.parse(event.data);
+      if (data.type === 'subtitle' && data.text) {
+        text = data.text;
+      }
+    } catch (e) {
+      // Fallback: plain text from older backend
+      text = event.data;
+    }
     if (text && text.trim()) {
       addSubtitle(text.trim());
     }

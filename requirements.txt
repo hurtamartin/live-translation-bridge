@@ -1,4 +1,5 @@
 torch
+torchaudio
 transformers
 sounddevice
 numpy
@@ -8,4 +9,3 @@ websockets
 jinja2
 protobuf
 sentencepiece
-webrtcvad

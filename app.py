@@ -3,48 +3,182 @@ import threading
 import queue
 import time
 import json
+import uuid
+from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import sounddevice as sd
 import torch
-from transformers import pipeline
+from transformers import SeamlessM4Tv2ForSpeechToText, AutoProcessor
 from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
 
 # --- CONFIG ---
-DEVICE_NAME_KEYWORD = "<<--Spotify2StudioLive"
-DEVICE_NAME_KEYWORD = "-->>StudioLive2Stream"
+#DEVICE_NAME_KEYWORD = "<<--Spotify2StudioLive"
+#DEVICE_NAME_KEYWORD = "-->>StudioLive2Stream"
 SAMPLE_RATE = 16000
 CHANNELS = 1
-SILENCE_THRESHOLD = 0.01
-SILENCE_DURATION = 1.0
-MIN_CHUNK_DURATION = 2.0
-MAX_CHUNK_DURATION = 15.0
+SILENCE_DURATION = 0.8
+MIN_CHUNK_DURATION = 1.5
+MAX_CHUNK_DURATION = 12.0
+CONTEXT_OVERLAP = 0.5
 DEFAULT_TARGET_LANG = "ces"
 
 # --- GLOBAL STATE ---
 audio_queue = queue.Queue()
-text_queue = asyncio.Queue()
+translation_queue = asyncio.Queue()
 stop_event = threading.Event()
-TARGET_LANG = DEFAULT_TARGET_LANG
 
-# --- MODEL / PIPELINE ---
-device = 0 if torch.backends.mps.is_available() else -1
-print(f"Using device: {'MPS' if device==0 else 'CPU'}")
+# --- DEVICE DETECTION ---
+def detect_device():
+    """Auto-detect best available device: CUDA > MPS > CPU."""
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        dtype = torch.float16
+        print(f"Using device: CUDA ({torch.cuda.get_device_name(0)})")
+        return device, dtype
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        device = torch.device("mps")
+        dtype = torch.float16
+        print("Using device: MPS (Apple Silicon)")
+        return device, dtype
+    print("WARNING: Using CPU - translation will be slow")
+    device = torch.device("cpu")
+    dtype = torch.float32
+    return device, dtype
 
-translator = pipeline(
-    task="automatic-speech-recognition",
-    model="facebook/seamless-m4t-v2-large",
-    device=device,
-    trust_remote_code=True
+device, dtype = detect_device()
+
+# --- MODEL (direct, not pipeline) ---
+MODEL_NAME = "facebook/seamless-m4t-v2-large"
+print(f"Loading model {MODEL_NAME}...")
+processor = AutoProcessor.from_pretrained(MODEL_NAME)
+model = SeamlessM4Tv2ForSpeechToText.from_pretrained(MODEL_NAME)
+model = model.to(device=device, dtype=dtype)
+model.eval()
+
+# torch.compile on CUDA if available
+if device.type == "cuda":
+    try:
+        model = torch.compile(model)
+        print("Model compiled with torch.compile()")
+    except Exception as e:
+        print(f"torch.compile() not available: {e}")
+
+print("Model loaded.")
+
+# --- MODEL WARM-UP ---
+def warmup_model():
+    """Run dummy inference to eliminate cold-start delay."""
+    print("Warming up model...")
+    dummy_audio = np.zeros(SAMPLE_RATE * 2, dtype=np.float32)  # 2s silence
+    inputs = processor(audios=dummy_audio, sampling_rate=SAMPLE_RATE, return_tensors="pt")
+    inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
+              for k, v in inputs.items()}
+    with torch.no_grad():
+        model.generate(**inputs, tgt_lang="ces", generate_speech=False)
+    print("Warm-up complete.")
+
+warmup_model()
+
+# --- SILERO VAD ---
+print("Loading Silero VAD...")
+vad_model, vad_utils = torch.hub.load(
+    repo_or_dir='snakers4/silero-vad',
+    model='silero_vad',
+    trust_repo=True
 )
-# Cast the underlying model to float16 if using MPS
-if torch.backends.mps.is_available():
-    translator.model = translator.model.to(torch.float16).to("mps")
-    print("Model cast to FP16 on MPS")
-    
+(get_speech_timestamps, _, read_audio, _, _) = vad_utils
+print("Silero VAD loaded.")
+
+def is_speech(audio_chunk_np: np.ndarray) -> bool:
+    """Check if audio chunk contains speech using Silero VAD."""
+    tensor = torch.from_numpy(audio_chunk_np).float()
+    if tensor.dim() > 1:
+        tensor = tensor.squeeze()
+    # Silero expects 16kHz mono
+    confidence = vad_model(tensor, SAMPLE_RATE).item()
+    return confidence > 0.5
+
+# --- MULTI-LANGUAGE TRANSLATION ---
+inference_executor = ThreadPoolExecutor(max_workers=1)
+
+def translate_audio(audio_np: np.ndarray, target_langs: list[str]) -> dict[str, str]:
+    """Translate audio to multiple languages. Encoder runs once, decoder per language."""
+    inputs = processor(audios=audio_np, sampling_rate=SAMPLE_RATE, return_tensors="pt")
+    inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
+              for k, v in inputs.items()}
+
+    results = {}
+    with torch.no_grad():
+        for lang in target_langs:
+            try:
+                output_tokens = model.generate(**inputs, tgt_lang=lang, generate_speech=False)
+                text = processor.decode(output_tokens[0].tolist(), skip_special_tokens=True).strip()
+                # Cleanup artifacts
+                text = text.replace("#err", "")
+                if text:
+                    results[lang] = text
+            except Exception as e:
+                print(f"Translation error for {lang}: {e}")
+    return results
+
+# --- SESSION MANAGER ---
+@dataclass
+class ClientSession:
+    session_id: str
+    websocket: WebSocket
+    target_lang: str = DEFAULT_TARGET_LANG
+
+class SessionManager:
+    def __init__(self):
+        self._sessions: dict[str, ClientSession] = {}
+        self._lock = threading.Lock()
+
+    async def connect(self, websocket: WebSocket) -> str:
+        await websocket.accept()
+        session_id = str(uuid.uuid4())
+        session = ClientSession(session_id=session_id, websocket=websocket)
+        with self._lock:
+            self._sessions[session_id] = session
+        return session_id
+
+    def disconnect(self, session_id: str):
+        with self._lock:
+            self._sessions.pop(session_id, None)
+
+    def set_language(self, session_id: str, lang: str):
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session:
+                session.target_lang = lang
+
+    def get_unique_languages(self) -> set[str]:
+        with self._lock:
+            return {s.target_lang for s in self._sessions.values()}
+
+    def get_sessions_for_language(self, lang: str) -> list[ClientSession]:
+        with self._lock:
+            return [s for s in self._sessions.values() if s.target_lang == lang]
+
+    async def send_to_language(self, lang: str, message: str):
+        sessions = self.get_sessions_for_language(lang)
+        payload = json.dumps({"type": "subtitle", "text": message})
+        for session in sessions:
+            try:
+                await session.websocket.send_text(payload)
+            except Exception:
+                pass
+
+    def client_count(self) -> int:
+        with self._lock:
+            return len(self._sessions)
+
+manager = SessionManager()
+
 # --- AUDIO CALLBACK ---
 def find_device_index(keyword):
     devices = sd.query_devices()
@@ -61,6 +195,15 @@ def audio_callback(indata, frames, time_info, status):
     audio_queue.put(indata.copy())
 
 # --- PROCESSING LOOP ---
+def submit_translation(audio_np, target_langs, loop):
+    """Run translation in ThreadPoolExecutor and push results to translation_queue."""
+    try:
+        results = translate_audio(audio_np, list(target_langs))
+        if results:
+            asyncio.run_coroutine_threadsafe(translation_queue.put(results), loop)
+    except Exception as e:
+        print(f"Translation Error: {e}")
+
 def processing_loop(loop):
     buffer = []
     prev_audio = np.array([], dtype=np.float32)
@@ -72,14 +215,15 @@ def processing_loop(loop):
             chunk = audio_queue.get(timeout=0.1)
             buffer.append(chunk)
             chunk_np = np.concatenate(chunk).flatten()
-            energy = np.sqrt(np.mean(chunk_np**2))
+
+            # Silero VAD
+            speech_detected = is_speech(chunk_np)
 
             total_frames = sum(c.shape[0] for c in buffer)
             total_duration = total_frames / SAMPLE_RATE
             current_time = time.time()
 
-            # VAD
-            if energy > SILENCE_THRESHOLD:
+            if speech_detected:
                 is_speaking = True
                 silence_start = None
             else:
@@ -95,29 +239,20 @@ def processing_loop(loop):
 
             if should_process and total_duration >= MIN_CHUNK_DURATION:
                 full_audio = np.concatenate([c.flatten() for c in buffer]).astype(np.float32)
-                
+
                 # Prepend context from previous segment
                 audio_to_process = full_audio
                 if prev_audio.size > 0:
-                     audio_to_process = np.concatenate((prev_audio, full_audio))
+                    audio_to_process = np.concatenate((prev_audio, full_audio))
 
-                try:
-                    # Translate to TARGET_LANG
-                    result = translator(audio_to_process, tgt_lang=TARGET_LANG)
-                    translated_text = result["text"].strip()
+                # Get unique languages from connected clients
+                target_langs = manager.get_unique_languages()
+                if target_langs:
+                    # Submit to ThreadPoolExecutor (non-blocking)
+                    inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
 
-                    # --- CLEANUP #err ---
-                    translated_text = translated_text.replace("#err", "")
-
-                    if translated_text:
-                        print(f"[{TARGET_LANG}] {translated_text}")
-                        asyncio.run_coroutine_threadsafe(text_queue.put(translated_text), loop)
-
-                except Exception as e:
-                    print(f"Transcription Error: {e}")
-
-                # Save last 1s as context for next time
-                samples_ctx = int(SAMPLE_RATE * 0.2)
+                # Save context overlap for next segment
+                samples_ctx = int(SAMPLE_RATE * CONTEXT_OVERLAP)
                 if full_audio.shape[0] > samples_ctx:
                     prev_audio = full_audio[-samples_ctx:]
                 else:
@@ -132,10 +267,6 @@ def processing_loop(loop):
                 samples_to_keep = int(SAMPLE_RATE * 1.0)
                 if total_frames > samples_to_keep * 5:
                     buffer = []
-                    # Also clear context if we had a massive silence, 
-                    # though arguably keeping the "silence" as context is fine too.
-                    # We'll stick to the request: persist context from "previous sentence".
-                    # If we drop the buffer here, it wasn't a sentence.
 
         except queue.Empty:
             continue
@@ -147,48 +278,41 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except Exception:
-                pass
-
-manager = ConnectionManager()
-
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+@app.get("/api/status")
+async def api_status():
+    return JSONResponse({
+        "status": "ok",
+        "clients": manager.client_count(),
+        "active_languages": sorted(manager.get_unique_languages()),
+        "device": device.type,
+    })
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    session_id = await manager.connect(websocket)
+    print(f"Client connected: {session_id}")
     try:
         while True:
             msg = await websocket.receive_text()
             data = json.loads(msg)
             if data.get("type") == "set_lang" and "lang" in data:
-                global TARGET_LANG
-                TARGET_LANG = data["lang"]
-                print(f"Target language changed to {TARGET_LANG}")
+                manager.set_language(session_id, data["lang"])
+                print(f"Session {session_id[:8]} language → {data['lang']}")
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.disconnect(session_id)
+        print(f"Client disconnected: {session_id[:8]}")
 
 async def broadcaster():
+    """Send translated texts to clients per their language."""
     while True:
-        text = await text_queue.get()
-        await manager.broadcast(text)
+        results = await translation_queue.get()  # dict[str, str]
+        for lang, text in results.items():
+            print(f"[{lang}] {text}")
+            await manager.send_to_language(lang, text)
 
 # --- MAIN ---
 if __name__ == "__main__":
@@ -206,9 +330,7 @@ if __name__ == "__main__":
     @app.on_event("startup")
     async def startup_event():
         loop = asyncio.get_running_loop()
-        # Start broadcaster task
         asyncio.create_task(broadcaster())
-        # Start audio processing thread with correct loop
         processing_thread = threading.Thread(target=processing_loop, args=(loop,), daemon=True)
         processing_thread.start()
 
