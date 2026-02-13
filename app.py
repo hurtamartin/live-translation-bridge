@@ -17,6 +17,7 @@ from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from scipy.signal import lfilter
 import uvicorn
 
 # --- LOGGING SETUP ---
@@ -166,16 +167,19 @@ logger.info("Model loaded.")
 
 # --- MODEL WARM-UP ---
 def warmup_model():
-    """Run dummy inference to eliminate cold-start delay."""
-    logger.info("Warming up model...")
+    """Run dummy inference to eliminate cold-start delay for main languages."""
+    logger.info("Warming up model (ces, spa, eng)...")
     sr = runtime_config["sample_rate"]
     dummy_audio = np.zeros(sr * 2, dtype=np.float32)
     inputs = processor(audio=dummy_audio, sampling_rate=sr, return_tensors="pt")
     inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
               for k, v in inputs.items()}
+    encoder_kwargs = {k: v for k, v in inputs.items() if k in ('input_features', 'attention_mask')}
     with torch.no_grad():
-        model.generate(**inputs, tgt_lang="ces")
-    logger.info("Warm-up complete.")
+        encoder_out = model.get_encoder()(**encoder_kwargs)
+        for lang in ("ces", "spa", "eng"):
+            model.generate(**inputs, encoder_outputs=encoder_out, tgt_lang=lang)
+    logger.info("Warm-up complete (ces, spa, eng).")
 
 warmup_model()
 
@@ -219,28 +223,30 @@ def preprocess_audio(audio_np: np.ndarray) -> np.ndarray:
     # 1. High-pass filter (remove low rumble below speech frequencies)
     if runtime_config["preprocess_highpass"]:
         cutoff = runtime_config["preprocess_highpass_cutoff"]
-        # Simple first-order IIR high-pass (very lightweight)
         rc = 1.0 / (2.0 * np.pi * cutoff)
         dt = 1.0 / sr
         alpha = rc / (rc + dt)
-        filtered = np.zeros_like(audio)
-        filtered[0] = audio[0]
-        for i in range(1, len(audio)):
-            filtered[i] = alpha * (filtered[i-1] + audio[i] - audio[i-1])
-        audio = filtered
+        b = [alpha, -alpha]
+        a = [1.0, -alpha]
+        audio = lfilter(b, a, audio).astype(np.float32)
 
-    # 2. Noise gate (silence audio below threshold)
+    # 2. Noise gate (silence audio below threshold) — vectorized
     if runtime_config["preprocess_noise_gate"]:
         threshold_db = runtime_config["preprocess_noise_gate_threshold"]
         threshold_linear = 10.0 ** (threshold_db / 20.0)
-        # Process in small frames to avoid cutting mid-word
         frame_size = int(sr * 0.02)  # 20ms frames
-        for start in range(0, len(audio), frame_size):
-            end = min(start + frame_size, len(audio))
-            frame = audio[start:end]
-            rms = np.sqrt(np.mean(frame ** 2))
-            if rms < threshold_linear:
-                audio[start:end] = 0.0
+        n_full = len(audio) // frame_size
+        if n_full > 0:
+            frames = audio[:n_full * frame_size].reshape(n_full, frame_size)
+            rms = np.sqrt(np.mean(frames ** 2, axis=1))
+            mask = rms < threshold_linear
+            frames[mask] = 0.0
+            audio[:n_full * frame_size] = frames.reshape(-1)
+        remainder = len(audio) - n_full * frame_size
+        if remainder > 0:
+            tail = audio[n_full * frame_size:]
+            if np.sqrt(np.mean(tail ** 2)) < threshold_linear:
+                audio[n_full * frame_size:] = 0.0
 
     # 3. Normalize volume
     if runtime_config["preprocess_normalize"]:
@@ -281,7 +287,6 @@ def detect_source_language(audio_np: np.ndarray) -> str | None:
 
 def translate_audio(audio_np: np.ndarray, target_langs: list[str]) -> dict[str, str]:
     """Translate audio to multiple languages. Encoder runs once, decoder per language."""
-    # Apply preprocessing
     processed_audio = preprocess_audio(audio_np)
 
     sr = runtime_config["sample_rate"]
@@ -289,22 +294,23 @@ def translate_audio(audio_np: np.ndarray, target_langs: list[str]) -> dict[str, 
     inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
               for k, v in inputs.items()}
 
-    # Auto language detection (log only, does not change target)
-    if runtime_config["preprocess_auto_language"]:
-        try:
-            with torch.no_grad():
-                # Use model's built-in language detection via encoder
-                encoder_out = model.get_encoder(**{k: v for k, v in inputs.items()
-                                                    if k in ('input_features', 'attention_mask')})
-            logger.debug("Auto language detection active (encoder pass)")
-        except Exception:
-            pass
-
+    # Run encoder once, reuse for all target languages
+    encoder_kwargs = {k: v for k, v in inputs.items() if k in ('input_features', 'attention_mask')}
     results = {}
     with torch.no_grad():
+        t_enc = time.time()
+        encoder_out = model.get_encoder()(**encoder_kwargs)
+        logger.debug(f"Encoder: {(time.time() - t_enc)*1000:.0f}ms")
+
         for lang in target_langs:
             try:
-                output_tokens = model.generate(**inputs, tgt_lang=lang)
+                t_dec = time.time()
+                output_tokens = model.generate(
+                    **inputs,
+                    encoder_outputs=encoder_out,
+                    tgt_lang=lang,
+                )
+                logger.debug(f"Decoder [{lang}]: {(time.time() - t_dec)*1000:.0f}ms")
                 text = processor.decode(output_tokens[0].tolist(), skip_special_tokens=True).strip()
                 text = text.replace("#err", "")
                 if text:
@@ -354,11 +360,14 @@ class SessionManager:
     async def send_to_language(self, lang: str, message: str):
         sessions = self.get_sessions_for_language(lang)
         payload = json.dumps({"type": "subtitle", "text": message})
-        for session in sessions:
+
+        async def _safe_send(session):
             try:
                 await session.websocket.send_text(payload)
             except Exception:
                 pass
+
+        await asyncio.gather(*[_safe_send(s) for s in sessions])
 
     def client_count(self) -> int:
         with self._lock:
@@ -470,8 +479,10 @@ def submit_translation(audio_np, target_langs, loop):
         logger.error(f"Translation Error: {e}")
 
 def processing_loop(loop):
-    buffer = []
-    vad_buffer = np.array([], dtype=np.float32)
+    MAX_BUFFER_SAMPLES = 48000 * 30  # max 30s @ 48kHz (safe upper bound)
+    audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
+    buffer_pos = 0
+    vad_buffer = torch.tensor([], dtype=torch.float32)
     prev_audio = np.array([], dtype=np.float32)
     silence_start = None
     is_speaking = False
@@ -491,26 +502,30 @@ def processing_loop(loop):
             with _audio_level_lock:
                 _audio_level_db = level
 
-            buffer.append(chunk_np)
+            # Pre-allocated buffer: append chunk
+            n = chunk_np.shape[0]
+            if buffer_pos + n <= MAX_BUFFER_SAMPLES:
+                audio_buffer[buffer_pos:buffer_pos + n] = chunk_np
+                buffer_pos += n
 
-            # Accumulate samples for VAD (needs exactly 512 samples at 16kHz)
-            vad_buffer = np.concatenate((vad_buffer, chunk_np))
+            # VAD: accumulate as torch tensor (avoid repeated numpy->tensor conversion)
+            chunk_tensor = torch.from_numpy(chunk_np).float()
+            vad_buffer = torch.cat((vad_buffer, chunk_tensor))
             speech_detected = is_speaking  # default: keep previous state
 
             # Process all complete 512-sample frames in the VAD buffer
             while vad_buffer.shape[0] >= VAD_MIN_SAMPLES:
                 vad_chunk = vad_buffer[:VAD_MIN_SAMPLES]
                 vad_buffer = vad_buffer[VAD_MIN_SAMPLES:]
-                speech_detected = is_speech(vad_chunk)
+                confidence = vad_model(vad_chunk, runtime_config["sample_rate"]).item()
+                speech_detected = confidence > 0.5
 
             sr = runtime_config["sample_rate"]  # 16kHz (after resampling)
-            total_frames = sum(c.shape[0] for c in buffer)
+            total_frames = buffer_pos  # O(1) instead of O(n)
             total_duration = total_frames / sr
             current_time = time.time()
 
             if speech_detected:
-                # if not is_speaking:
-                #     logger.debug(f"Speech started (buffer: {total_duration:.1f}s)")
                 is_speaking = True
                 silence_start = None
             else:
@@ -531,7 +546,7 @@ def processing_loop(loop):
                 should_process = True
 
             if should_process and total_duration >= min_chunk:
-                full_audio = np.concatenate(buffer).astype(np.float32)
+                full_audio = audio_buffer[:buffer_pos].copy().astype(np.float32)
 
                 # Prepend context from previous segment
                 audio_to_process = full_audio
@@ -541,10 +556,11 @@ def processing_loop(loop):
                 # Get unique languages from connected clients
                 target_langs = manager.get_unique_languages()
                 if target_langs:
-                    # logger.info(f"Submitting translation: {total_duration:.1f}s audio -> {target_langs}")
-                    inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
-                else:
-                    pass  # no connected clients
+                    # Backpressure: drop chunk if inference queue is already busy
+                    if inference_executor._work_queue.qsize() >= 1:
+                        logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference queue busy")
+                    else:
+                        inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
 
                 # Save context overlap for next segment
                 samples_ctx = int(sr * ctx_overlap)
@@ -553,7 +569,7 @@ def processing_loop(loop):
                 else:
                     prev_audio = full_audio
 
-                buffer = []
+                buffer_pos = 0
                 is_speaking = False
                 silence_start = None
 
@@ -561,7 +577,7 @@ def processing_loop(loop):
             elif not is_speaking and total_duration > min_chunk:
                 samples_to_keep = int(sr * 1.0)
                 if total_frames > samples_to_keep * 5:
-                    buffer = []
+                    buffer_pos = 0
 
         except queue.Empty:
             continue
@@ -766,9 +782,11 @@ async def broadcaster():
     """Send translated texts to clients per their language."""
     while True:
         results = await translation_queue.get()
+        tasks = []
         for lang, text in results.items():
             logger.info(f"[{lang}] {text}")
-            await manager.send_to_language(lang, text)
+            tasks.append(manager.send_to_language(lang, text))
+        await asyncio.gather(*tasks)
 
 # --- MAIN ---
 if __name__ == "__main__":

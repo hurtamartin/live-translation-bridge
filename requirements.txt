@@ -3,6 +3,7 @@ torchaudio
 transformers
 sounddevice
 numpy
+scipy
 fastapi
 uvicorn
 websockets
