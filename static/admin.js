@@ -1,19 +1,222 @@
 'use strict';
 
+/* ========== i18n Translations ========== */
+
+var ADMIN_TRANSLATIONS = {
+  cs: {
+    adminTitle: 'Admin Panel',
+    mainPage: 'Hlavni stranka',
+    statusTitle: 'Status',
+    clients: 'Klienti',
+    languages: 'Jazyky',
+    hardware: 'Hardware',
+    uptime: 'Uptime',
+    audioDeviceTitle: 'Audio zarizeni',
+    device: 'Zarizeni',
+    channel: 'Kanal',
+    apply: 'Pouzit',
+    loading: 'Nacitam...',
+    systemDefault: '-- Systemovy vychozi --',
+    inputSignalTitle: 'Vstupni signal',
+    translationParamsTitle: 'Parametry prekladu',
+    silenceDuration: 'Silence Duration',
+    minChunkDuration: 'Min Chunk Duration',
+    maxChunkDuration: 'Max Chunk Duration',
+    contextOverlap: 'Context Overlap',
+    defaultTargetLang: 'Default Target Language',
+    defaults: 'Vychozi',
+    export: 'Export',
+    import: 'Import',
+    preprocessingTitle: 'Audio preprocessing',
+    preprocessingDesc: 'Zpracovani vstupniho signalu pred odeslanim do modelu. Zapnete jen to, co potrebujete.',
+    noiseGate: 'Noise Gate',
+    noiseGateHint: 'Ztisi audio pod prahem hlasitosti',
+    threshold: 'Threshold',
+    volumeNormalize: 'Normalizace hlasitosti',
+    volumeNormalizeHint: 'Vyrovnava uroven hlasitosti',
+    targetLevel: 'Target level',
+    highpassFilter: 'High-pass filtr',
+    highpassHint: 'Odrizne hluboke frekvence pod reci',
+    cutoff: 'Cutoff',
+    autoLangDetect: 'Automaticka detekce zdrojoveho jazyka',
+    autoLangHint: 'Model se pokusi detekovat jazyk reci',
+    performanceTitle: 'Vykon',
+    totalTranslations: 'Celkem prekladu',
+    encoderAvg: 'Encoder (avg)',
+    decoderAvg: 'Decoder (avg)',
+    gpuMemory: 'GPU pamet',
+    connectedClientsTitle: 'Pripojeni klienti',
+    thId: 'ID',
+    thLang: 'Jazyk',
+    thIp: 'IP',
+    thConnected: 'Pripojeno',
+    noClients: 'Zadni klienti',
+    translationHistoryTitle: 'Historie prekladu',
+    refresh: 'Obnovit',
+    noTranslations: 'Zatim zadne preklady',
+    logTitle: 'Log',
+    autoScroll: 'Auto-scroll',
+    clearLog: 'Vymazat',
+    confirmCancel: 'Zrusit',
+    confirmReset: 'Ano, resetovat',
+    // Toast / dynamic messages
+    saving: 'Ukladam...',
+    saved: 'Ulozeno',
+    connectionError: 'Chyba spojeni',
+    serverConnectionError: 'Chyba spojeni se serverem',
+    saveError: 'Chyba ukladani',
+    defaultsRestored: 'Vychozi nastaveni obnovena',
+    configExported: 'Konfigurace exportovana',
+    exportError: 'Chyba exportu',
+    configImported: 'Konfigurace importovana',
+    importError: 'Chyba importu',
+    invalidJson: 'Neplatny JSON soubor',
+    deviceChanged: 'Audio zarizeni zmeneno',
+    deviceLoadError: 'Chyba nacitani zarizeni',
+    unknownError: 'Neznama chyba',
+    error: 'Chyba',
+    ok: 'OK!',
+    confirmResetText: 'Opravdu chcete resetovat vsechna nastaveni na vychozi hodnoty? Tato akce je nevratna.',
+    stopped: 'Stopped',
+    pending: 'Pending',
+    statusParseError: 'Chyba zpracovani statusu',
+    configLoadError: 'Chyba nacteni konfigurace',
+    logParseError: 'Chyba zpracovani logu',
+    metricsLoadError: 'Chyba nacteni metrik',
+    sessionsLoadError: 'Chyba nacteni sessions',
+    translationsLoadError: 'Chyba nacteni prekladu',
+    audioHistoryError: 'Chyba nacteni audio historie',
+    keys: 'klicu',
+    mono: 'Mono',
+  },
+  en: {
+    adminTitle: 'Admin Panel',
+    mainPage: 'Main Page',
+    statusTitle: 'Status',
+    clients: 'Clients',
+    languages: 'Languages',
+    hardware: 'Hardware',
+    uptime: 'Uptime',
+    audioDeviceTitle: 'Audio Device',
+    device: 'Device',
+    channel: 'Channel',
+    apply: 'Apply',
+    loading: 'Loading...',
+    systemDefault: '-- System default --',
+    inputSignalTitle: 'Input Signal',
+    translationParamsTitle: 'Translation Parameters',
+    silenceDuration: 'Silence Duration',
+    minChunkDuration: 'Min Chunk Duration',
+    maxChunkDuration: 'Max Chunk Duration',
+    contextOverlap: 'Context Overlap',
+    defaultTargetLang: 'Default Target Language',
+    defaults: 'Defaults',
+    export: 'Export',
+    import: 'Import',
+    preprocessingTitle: 'Audio Preprocessing',
+    preprocessingDesc: 'Processing of input signal before sending to the model. Enable only what you need.',
+    noiseGate: 'Noise Gate',
+    noiseGateHint: 'Silences audio below volume threshold',
+    threshold: 'Threshold',
+    volumeNormalize: 'Volume Normalization',
+    volumeNormalizeHint: 'Equalizes volume level',
+    targetLevel: 'Target level',
+    highpassFilter: 'High-pass Filter',
+    highpassHint: 'Cuts low frequencies below speech range',
+    cutoff: 'Cutoff',
+    autoLangDetect: 'Auto source language detection',
+    autoLangHint: 'Model will try to detect speech language',
+    performanceTitle: 'Performance',
+    totalTranslations: 'Total translations',
+    encoderAvg: 'Encoder (avg)',
+    decoderAvg: 'Decoder (avg)',
+    gpuMemory: 'GPU Memory',
+    connectedClientsTitle: 'Connected Clients',
+    thId: 'ID',
+    thLang: 'Language',
+    thIp: 'IP',
+    thConnected: 'Connected',
+    noClients: 'No clients',
+    translationHistoryTitle: 'Translation History',
+    refresh: 'Refresh',
+    noTranslations: 'No translations yet',
+    logTitle: 'Log',
+    autoScroll: 'Auto-scroll',
+    clearLog: 'Clear',
+    confirmCancel: 'Cancel',
+    confirmReset: 'Yes, reset',
+    // Toast / dynamic messages
+    saving: 'Saving...',
+    saved: 'Saved',
+    connectionError: 'Connection error',
+    serverConnectionError: 'Server connection error',
+    saveError: 'Save error',
+    defaultsRestored: 'Default settings restored',
+    configExported: 'Configuration exported',
+    exportError: 'Export error',
+    configImported: 'Configuration imported',
+    importError: 'Import error',
+    invalidJson: 'Invalid JSON file',
+    deviceChanged: 'Audio device changed',
+    deviceLoadError: 'Error loading devices',
+    unknownError: 'Unknown error',
+    error: 'Error',
+    ok: 'OK!',
+    confirmResetText: 'Are you sure you want to reset all settings to defaults? This action cannot be undone.',
+    stopped: 'Stopped',
+    pending: 'Pending',
+    statusParseError: 'Status parse error',
+    configLoadError: 'Config load error',
+    logParseError: 'Log parse error',
+    metricsLoadError: 'Error loading metrics',
+    sessionsLoadError: 'Error loading sessions',
+    translationsLoadError: 'Error loading translations',
+    audioHistoryError: 'Error loading audio history',
+    keys: 'keys',
+    mono: 'Mono',
+  }
+};
+
+function adminT(key) {
+  var lang = adminState.lang;
+  if (ADMIN_TRANSLATIONS[lang] && ADMIN_TRANSLATIONS[lang][key]) {
+    return ADMIN_TRANSLATIONS[lang][key];
+  }
+  if (ADMIN_TRANSLATIONS.cs && ADMIN_TRANSLATIONS.cs[key]) {
+    return ADMIN_TRANSLATIONS.cs[key];
+  }
+  return key;
+}
+
+function updateAdminUI() {
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n');
+    el.textContent = adminT(key);
+  });
+}
+
 /* ========== State ========== */
 
-var logWs = null;
-var statusWs = null;
-var autoScroll = true;
-var devicesCache = [];
-var saveDebounceTimer = null;
-var confirmCallback = null;
+var adminState = {
+  logWs: null,
+  statusWs: null,
+  autoScroll: true,
+  devicesCache: [],
+  audioHistoryData: [],
+  confirmCallback: null,
+  saveDebounceTimer: null,
+  ppSaveTimer: null,
+  lang: localStorage.getItem('adminLang') || 'cs',
+};
+
+var MAX_LOG_ENTRIES = 200;
 
 /* ========== DOM ========== */
 
 var dom = {
   themeToggle: document.getElementById('themeToggle'),
   themeIcon: document.getElementById('themeIcon'),
+  adminLangSelect: document.getElementById('adminLangSelect'),
   // Status
   dotModel: document.getElementById('dotModel'),
   dotVad: document.getElementById('dotVad'),
@@ -108,14 +311,13 @@ function toggleTheme() {
   applyTheme();
 }
 
-/* ========== Toast Notifications (D) ========== */
+/* ========== Toast Notifications ========== */
 
 function showToast(message, type) {
   var toast = document.createElement('div');
   toast.className = 'toast toast--' + (type || 'info');
   toast.textContent = message;
   dom.toastContainer.appendChild(toast);
-  // Trigger reflow for animation
   toast.offsetHeight;
   toast.classList.add('toast--visible');
   setTimeout(function() {
@@ -124,17 +326,17 @@ function showToast(message, type) {
   }, 3000);
 }
 
-/* ========== Confirm Dialog (C) ========== */
+/* ========== Confirm Dialog ========== */
 
 function showConfirm(text, callback) {
   dom.confirmText.textContent = text;
-  confirmCallback = callback;
+  adminState.confirmCallback = callback;
   dom.confirmOverlay.classList.add('confirm-overlay--open');
 }
 
 function hideConfirm() {
   dom.confirmOverlay.classList.remove('confirm-overlay--open');
-  confirmCallback = null;
+  adminState.confirmCallback = null;
 }
 
 /* ========== Auto-save helpers ========== */
@@ -151,7 +353,7 @@ function showSaveStatus(el, text, cssClass) {
 }
 
 function postConfig(configObj, statusEl) {
-  showSaveStatus(statusEl, 'Ukladam...', 'save-status--saving');
+  showSaveStatus(statusEl, adminT('saving'), 'save-status--saving');
   return fetch('/api/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -160,20 +362,21 @@ function postConfig(configObj, statusEl) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.errors) {
-        showSaveStatus(statusEl, 'Chyba: ' + Object.values(data.errors).join(', '), 'save-status--error');
-        showToast('Chyba ukladani: ' + Object.values(data.errors).join(', '), 'error');
+        showSaveStatus(statusEl, adminT('error') + ': ' + Object.values(data.errors).join(', '), 'save-status--error');
+        showToast(adminT('saveError') + ': ' + Object.values(data.errors).join(', '), 'error');
       } else {
-        showSaveStatus(statusEl, 'Ulozeno', 'save-status--ok');
+        showSaveStatus(statusEl, adminT('saved'), 'save-status--ok');
       }
       return data;
     })
-    .catch(function() {
-      showSaveStatus(statusEl, 'Chyba spojeni', 'save-status--error');
-      showToast('Chyba spojeni se serverem', 'error');
+    .catch(function(err) {
+      console.error('Config save error:', err);
+      showSaveStatus(statusEl, adminT('connectionError'), 'save-status--error');
+      showToast(adminT('serverConnectionError'), 'error');
     });
 }
 
-/* ========== Status via WebSocket (E) ========== */
+/* ========== Status via WebSocket ========== */
 
 function formatUptime(seconds) {
   var h = Math.floor(seconds / 3600);
@@ -211,18 +414,18 @@ function handleStatusData(data) {
     if (c.audio_stream.status === 'running') {
       dom.detailAudio.textContent = c.audio_stream.device_name + ' ch' + c.audio_stream.channel;
     } else {
-      dom.detailAudio.textContent = 'Stopped';
+      dom.detailAudio.textContent = adminT('stopped');
     }
   }
   if (c.inference_executor) {
     setDot(dom.dotInference, c.inference_executor.status);
-    dom.detailInference.textContent = 'Pending: ' + c.inference_executor.pending_tasks;
+    dom.detailInference.textContent = adminT('pending') + ': ' + c.inference_executor.pending_tasks;
   }
 
-  dom.infoClients.textContent = 'Klienti: ' + data.clients;
-  dom.infoLanguages.textContent = 'Jazyky: ' + (data.active_languages.length > 0 ? data.active_languages.join(', ') : '--');
-  dom.infoDevice.textContent = 'Hardware: ' + data.device.toUpperCase();
-  dom.infoUptime.textContent = 'Uptime: ' + formatUptime(data.uptime);
+  dom.infoClients.textContent = adminT('clients') + ': ' + data.clients;
+  dom.infoLanguages.textContent = adminT('languages') + ': ' + (data.active_languages.length > 0 ? data.active_languages.join(', ') : '--');
+  dom.infoDevice.textContent = adminT('hardware') + ': ' + data.device.toUpperCase();
+  dom.infoUptime.textContent = adminT('uptime') + ': ' + formatUptime(data.uptime);
 
   // VU Meter with peak hold
   if (data.audio_level_db !== undefined) {
@@ -242,22 +445,25 @@ function connectStatusWs() {
   var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   var url = protocol + '//' + window.location.host + '/api/status/ws';
 
-  statusWs = new WebSocket(url);
+  adminState.statusWs = new WebSocket(url);
 
-  statusWs.onmessage = function(event) {
+  adminState.statusWs.onmessage = function(event) {
     try {
       var data = JSON.parse(event.data);
       handleStatusData(data);
     } catch (e) {
       console.error('Status parse error:', e);
+      showToast(adminT('statusParseError'), 'error');
     }
   };
 
-  statusWs.onclose = function() {
+  adminState.statusWs.onclose = function() {
     setTimeout(connectStatusWs, 3000);
   };
 
-  statusWs.onerror = function() {};
+  adminState.statusWs.onerror = function(err) {
+    console.error('Status WS error:', err);
+  };
 }
 
 /* ========== Config UI sync ========== */
@@ -310,7 +516,10 @@ function loadConfig() {
   fetch('/api/config')
     .then(function(r) { return r.json(); })
     .then(function(config) { syncConfigUI(config); })
-    .catch(function(err) { console.error('Config load error:', err); });
+    .catch(function(err) {
+      console.error('Config load error:', err);
+      showToast(adminT('configLoadError'), 'error');
+    });
 }
 
 /* ========== Auto-save: Translation Parameters ========== */
@@ -328,8 +537,6 @@ function autoSaveConfig() {
 
 /* ========== Auto-save: Preprocessing ========== */
 
-var ppSaveTimer = null;
-
 function autoSavePreprocess() {
   var config = {
     preprocess_noise_gate: dom.ppNoiseGate.checked,
@@ -343,10 +550,10 @@ function autoSavePreprocess() {
   postConfig(config, dom.preprocessStatus);
 }
 
-/* ========== Reset with Confirm (C) ========== */
+/* ========== Reset with Confirm ========== */
 
 function resetConfig() {
-  showConfirm('Opravdu chcete resetovat vsechna nastaveni na vychozi hodnoty? Tato akce je nevratna.', function() {
+  showConfirm(adminT('confirmResetText'), function() {
     var defaults = {
       silence_duration: 0.8,
       min_chunk_duration: 1.5,
@@ -371,16 +578,17 @@ function resetConfig() {
       .then(function(data) {
         if (!data.errors) {
           syncConfigUI(data);
-          showToast('Vychozi nastaveni obnovena', 'success');
+          showToast(adminT('defaultsRestored'), 'success');
         }
       })
       .catch(function(err) {
-        showToast('Chyba: ' + err.message, 'error');
+        console.error('Config reset error:', err);
+        showToast(adminT('error') + ': ' + err.message, 'error');
       });
   });
 }
 
-/* ========== Config Export/Import (B) ========== */
+/* ========== Config Export/Import ========== */
 
 function exportConfig() {
   fetch('/api/config/export')
@@ -393,9 +601,12 @@ function exportConfig() {
       a.download = 'config.json';
       a.click();
       URL.revokeObjectURL(url);
-      showToast('Konfigurace exportovana', 'success');
+      showToast(adminT('configExported'), 'success');
     })
-    .catch(function() { showToast('Chyba exportu', 'error'); });
+    .catch(function(err) {
+      console.error('Config export error:', err);
+      showToast(adminT('exportError'), 'error');
+    });
 }
 
 function importConfig() {
@@ -418,18 +629,20 @@ function handleImportFile(e) {
         .then(function(data) {
           if (data.ok) {
             syncConfigUI(data.config);
-            showToast('Konfigurace importovana (' + data.imported + ' klicu)', 'success');
+            showToast(adminT('configImported') + ' (' + data.imported + ' ' + adminT('keys') + ')', 'success');
           } else {
-            showToast('Chyba importu: ' + (data.error || ''), 'error');
+            showToast(adminT('importError') + ': ' + (data.error || ''), 'error');
           }
         })
-        .catch(function() { showToast('Chyba spojeni', 'error'); });
+        .catch(function(err) {
+          console.error('Config import error:', err);
+          showToast(adminT('connectionError'), 'error');
+        });
     } catch (err) {
-      showToast('Neplatny JSON soubor', 'error');
+      showToast(adminT('invalidJson'), 'error');
     }
   };
   reader.readAsText(file);
-  // Reset file input
   e.target.value = '';
 }
 
@@ -439,15 +652,15 @@ function fetchDevices() {
   fetch('/api/devices')
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      devicesCache = data.devices || [];
+      adminState.devicesCache = data.devices || [];
       dom.deviceSelect.innerHTML = '';
 
       var defaultOpt = document.createElement('option');
       defaultOpt.value = '';
-      defaultOpt.textContent = '-- Systemovy vychozi --';
+      defaultOpt.textContent = adminT('systemDefault');
       dom.deviceSelect.appendChild(defaultOpt);
 
-      devicesCache.forEach(function(dev) {
+      adminState.devicesCache.forEach(function(dev) {
         var opt = document.createElement('option');
         opt.value = dev.index;
         opt.textContent = dev.name + ' (' + dev.max_input_channels + ' ch)';
@@ -463,7 +676,10 @@ function fetchDevices() {
 
       updateChannelOptions(data.current_device_index, data.current_channel);
     })
-    .catch(function() { showToast('Chyba nacitani zarizeni', 'error'); });
+    .catch(function(err) {
+      console.error('Devices load error:', err);
+      showToast(adminT('deviceLoadError'), 'error');
+    });
 }
 
 function updateChannelOptions(deviceIndex, currentChannel) {
@@ -471,14 +687,14 @@ function updateChannelOptions(deviceIndex, currentChannel) {
   var maxChannels = 1;
 
   if (deviceIndex !== null && deviceIndex !== '') {
-    var dev = devicesCache.find(function(d) { return d.index === parseInt(deviceIndex); });
+    var dev = adminState.devicesCache.find(function(d) { return d.index === parseInt(deviceIndex); });
     if (dev) maxChannels = dev.max_input_channels;
   }
 
   for (var i = 0; i < maxChannels; i++) {
     var opt = document.createElement('option');
     opt.value = i;
-    opt.textContent = (i + 1) + (maxChannels === 1 ? ' (Mono)' : '');
+    opt.textContent = (i + 1) + (maxChannels === 1 ? ' (' + adminT('mono') + ')' : '');
     dom.channelSelect.appendChild(opt);
   }
 
@@ -492,7 +708,7 @@ function applyDeviceSelection() {
   var channel = parseInt(dom.channelSelect.value);
 
   dom.applyDevice.disabled = true;
-  dom.applyDevice.textContent = 'Nacitam...';
+  dom.applyDevice.textContent = adminT('loading');
 
   fetch('/api/devices/select', {
     method: 'POST',
@@ -502,37 +718,39 @@ function applyDeviceSelection() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok) {
-        dom.applyDevice.textContent = 'OK!';
-        showToast('Audio zarizeni zmeneno', 'success');
+        dom.applyDevice.textContent = adminT('ok');
+        showToast(adminT('deviceChanged'), 'success');
       } else {
-        dom.applyDevice.textContent = 'Chyba';
-        showToast('Chyba: ' + (data.error || 'Neznama chyba'), 'error');
+        dom.applyDevice.textContent = adminT('error');
+        showToast(adminT('error') + ': ' + (data.error || adminT('unknownError')), 'error');
       }
     })
     .catch(function(err) {
-      dom.applyDevice.textContent = 'Chyba';
-      showToast('Chyba: ' + err.message, 'error');
+      console.error('Device select error:', err);
+      dom.applyDevice.textContent = adminT('error');
+      showToast(adminT('error') + ': ' + err.message, 'error');
     })
     .finally(function() {
       setTimeout(function() {
         dom.applyDevice.disabled = false;
-        dom.applyDevice.textContent = 'Pouzit';
+        dom.applyDevice.textContent = adminT('apply');
       }, 1500);
     });
 }
 
-/* ========== Audio History Graph (F) ========== */
-
-var audioHistoryData = [];
+/* ========== Audio History Graph ========== */
 
 function fetchAudioHistory() {
   fetch('/api/audio-history')
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      audioHistoryData = data;
+      adminState.audioHistoryData = data;
       drawAudioHistory();
     })
-    .catch(function() {});
+    .catch(function(err) {
+      console.error('Audio history error:', err);
+      showToast(adminT('audioHistoryError'), 'error');
+    });
 }
 
 function drawAudioHistory() {
@@ -545,11 +763,9 @@ function drawAudioHistory() {
 
   ctx.clearRect(0, 0, w, h);
 
-  // Background
   ctx.fillStyle = isDark ? '#0d0d12' : '#f0f0f5';
   ctx.fillRect(0, 0, w, h);
 
-  // Grid lines at -40, -20, 0 dB
   ctx.strokeStyle = isDark ? '#2a2a3a' : '#e2e4ea';
   ctx.lineWidth = 1;
   [-40, -20, 0].forEach(function(db) {
@@ -560,12 +776,11 @@ function drawAudioHistory() {
     ctx.stroke();
   });
 
-  if (audioHistoryData.length < 2) return;
+  if (adminState.audioHistoryData.length < 2) return;
 
-  var data = audioHistoryData;
+  var data = adminState.audioHistoryData;
   var step = w / 60;
 
-  // Draw RMS level
   ctx.strokeStyle = '#22c55e';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -577,7 +792,6 @@ function drawAudioHistory() {
   }
   ctx.stroke();
 
-  // Draw peak
   ctx.strokeStyle = '#ef4444';
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
@@ -592,7 +806,7 @@ function drawAudioHistory() {
   ctx.setLineDash([]);
 }
 
-/* ========== Metrics (G) ========== */
+/* ========== Metrics ========== */
 
 function fetchMetrics() {
   fetch('/api/metrics')
@@ -607,17 +821,20 @@ function fetchMetrics() {
         dom.metricGpu.textContent = 'N/A (CPU)';
       }
     })
-    .catch(function() {});
+    .catch(function(err) {
+      console.error('Metrics load error:', err);
+      showToast(adminT('metricsLoadError'), 'error');
+    });
 }
 
-/* ========== Sessions (G) ========== */
+/* ========== Sessions ========== */
 
 function fetchSessions() {
   fetch('/api/sessions')
     .then(function(r) { return r.json(); })
     .then(function(sessions) {
       if (sessions.length === 0) {
-        dom.sessionsBody.innerHTML = '<tr><td colspan="4" class="sessions-table__empty">Zadni klienti</td></tr>';
+        dom.sessionsBody.innerHTML = '<tr><td colspan="4" class="sessions-table__empty">' + adminT('noClients') + '</td></tr>';
         return;
       }
       dom.sessionsBody.innerHTML = '';
@@ -627,21 +844,23 @@ function fetchSessions() {
         dom.sessionsBody.appendChild(tr);
       });
     })
-    .catch(function() {});
+    .catch(function(err) {
+      console.error('Sessions load error:', err);
+      showToast(adminT('sessionsLoadError'), 'error');
+    });
 }
 
-/* ========== Translation History (G) ========== */
+/* ========== Translation History ========== */
 
 function fetchTranslations() {
   fetch('/api/translations')
     .then(function(r) { return r.json(); })
     .then(function(entries) {
       if (entries.length === 0) {
-        dom.translationHistory.innerHTML = '<div class="translation-history__empty">Zatim zadne preklady</div>';
+        dom.translationHistory.innerHTML = '<div class="translation-history__empty">' + adminT('noTranslations') + '</div>';
         return;
       }
       dom.translationHistory.innerHTML = '';
-      // Show newest first
       entries.reverse().forEach(function(entry) {
         var el = document.createElement('div');
         el.className = 'translation-entry';
@@ -652,12 +871,13 @@ function fetchTranslations() {
         dom.translationHistory.appendChild(el);
       });
     })
-    .catch(function() {});
+    .catch(function(err) {
+      console.error('Translations load error:', err);
+      showToast(adminT('translationsLoadError'), 'error');
+    });
 }
 
 /* ========== Log WebSocket ========== */
-
-var MAX_LOG_ENTRIES = 200;
 
 function addLogEntry(entry) {
   var el = document.createElement('div');
@@ -669,7 +889,7 @@ function addLogEntry(entry) {
     dom.logContainer.removeChild(dom.logContainer.firstChild);
   }
 
-  if (autoScroll) {
+  if (adminState.autoScroll) {
     dom.logContainer.scrollTop = dom.logContainer.scrollHeight;
   }
 }
@@ -678,9 +898,9 @@ function connectLogWs() {
   var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   var url = protocol + '//' + window.location.host + '/api/logs';
 
-  logWs = new WebSocket(url);
+  adminState.logWs = new WebSocket(url);
 
-  logWs.onmessage = function(event) {
+  adminState.logWs.onmessage = function(event) {
     try {
       var data = JSON.parse(event.data);
       if (data.type === 'history' && data.entries) {
@@ -690,20 +910,33 @@ function connectLogWs() {
       }
     } catch (e) {
       console.error('Log parse error:', e);
+      showToast(adminT('logParseError'), 'error');
     }
   };
 
-  logWs.onclose = function() {
+  adminState.logWs.onclose = function() {
     setTimeout(connectLogWs, 3000);
   };
 
-  logWs.onerror = function() {};
+  adminState.logWs.onerror = function(err) {
+    console.error('Log WS error:', err);
+  };
 }
 
 /* ========== Event Listeners ========== */
 
 function initEvents() {
   dom.themeToggle.addEventListener('click', toggleTheme);
+
+  // Language selector
+  if (dom.adminLangSelect) {
+    dom.adminLangSelect.value = adminState.lang;
+    dom.adminLangSelect.addEventListener('change', function() {
+      adminState.lang = dom.adminLangSelect.value;
+      localStorage.setItem('adminLang', adminState.lang);
+      updateAdminUI();
+    });
+  }
 
   // Device selection
   dom.deviceSelect.addEventListener('change', function() {
@@ -765,7 +998,7 @@ function initEvents() {
 
   // Log
   dom.logAutoScroll.addEventListener('change', function() {
-    autoScroll = dom.logAutoScroll.checked;
+    adminState.autoScroll = dom.logAutoScroll.checked;
   });
   dom.clearLog.addEventListener('click', function() {
     dom.logContainer.innerHTML = '';
@@ -773,7 +1006,7 @@ function initEvents() {
 
   // Confirm dialog
   dom.confirmOk.addEventListener('click', function() {
-    if (confirmCallback) confirmCallback();
+    if (adminState.confirmCallback) adminState.confirmCallback();
     hideConfirm();
   });
   dom.confirmCancel.addEventListener('click', hideConfirm);
@@ -802,6 +1035,7 @@ function fetchPeriodicData() {
 
 function init() {
   applyTheme();
+  updateAdminUI();
   initEvents();
   loadConfig();
   fetchDevices();
@@ -810,7 +1044,6 @@ function init() {
   fetchTranslations();
   fetchPeriodicData();
 
-  // Refresh metrics, sessions, audio history every 5s
   setInterval(fetchPeriodicData, 5000);
 }
 

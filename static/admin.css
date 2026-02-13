@@ -28,6 +28,18 @@ body {
   gap: var(--space-md);
 }
 
+.admin-lang-select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  appearance: auto;
+}
+
 .admin-header__link {
   color: var(--accent);
   text-decoration: none;
