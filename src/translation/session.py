@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from fastapi import WebSocket
 
 from src.config import runtime_config
+from src.logging_handler import logger
 
 MAX_CLIENTS = int(os.environ.get("MAX_CLIENTS", "200"))
 
@@ -68,7 +69,8 @@ class SessionManager:
             try:
                 await session.websocket.send_text(payload)
             except Exception:
-                pass
+                # Normal during client disconnect — session removed in websocket_endpoint finally
+                logger.debug(f"Send failed for session {session.session_id[:8]} (likely disconnected)")
 
         await asyncio.gather(*[_safe_send(s) for s in sessions])
 

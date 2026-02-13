@@ -474,7 +474,10 @@ def processing_loop(loop):
             chunk = state.audio_queue.get(timeout=0.1)
             chunk_np = np.concatenate(chunk).flatten()
 
-            chunk_np = resample_audio(chunk_np, state.resampler)
+            # Grab resampler reference under lock (restart_audio_stream writes it)
+            with state.audio_stream_lock:
+                current_resampler = state.resampler
+            chunk_np = resample_audio(chunk_np, current_resampler)
 
             level = compute_audio_level(chunk_np)
             with state._audio_level_lock:
