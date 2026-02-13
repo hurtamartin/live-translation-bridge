@@ -269,12 +269,31 @@ async def api_config_import(request: Request, _user: str = Depends(verify_admin)
 async def health_check():
     with state.audio_stream_lock:
         audio_ok = state.audio_stream is not None and state.audio_stream.active
+    model_ok = state.processor is not None and state.model is not None
+    thread_ok = state.processing_thread is not None and state.processing_thread.is_alive()
+
+    gpu_ok = True
+    if state.device and state.device.type == "cuda":
+        try:
+            torch.cuda.mem_get_info(0)
+        except Exception:
+            gpu_ok = False
+
+    if model_ok and thread_ok and audio_ok and gpu_ok:
+        status = "healthy"
+    elif model_ok and thread_ok:
+        status = "degraded"
+    else:
+        status = "unhealthy"
+
     return JSONResponse({
-        "status": "healthy" if audio_ok else "degraded",
+        "status": status,
         "uptime": int(time.time() - state.start_time),
         "clients": state.manager.client_count(),
         "audio_stream": "running" if audio_ok else "stopped",
-        "model": "loaded",
+        "model": "loaded" if model_ok else "not_loaded",
+        "processing_thread": "running" if thread_ok else "stopped",
+        "gpu": "ok" if gpu_ok else "error",
     })
 
 
@@ -459,6 +478,9 @@ def submit_translation(audio_np, target_langs, loop):
         logger.error(f"Translation Error: {e}")
 
 
+INFERENCE_TIMEOUT = 30  # seconds — log critical if inference exceeds this
+
+
 def processing_loop(loop):
     MAX_BUFFER_SAMPLES = 48000 * 30
     audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
@@ -468,6 +490,8 @@ def processing_loop(loop):
     silence_start = None
     is_speaking = False
     VAD_MIN_SAMPLES = 512
+    last_future = None
+    last_future_time = 0
 
     while not state.stop_event.is_set():
         try:
@@ -532,10 +556,21 @@ def processing_loop(loop):
 
                 target_langs = state.manager.get_unique_languages()
                 if target_langs:
-                    if state.inference_executor._work_queue.qsize() >= 1:
+                    # Check for stuck inference
+                    if last_future is not None and not last_future.done():
+                        elapsed = time.time() - last_future_time
+                        if elapsed > INFERENCE_TIMEOUT:
+                            logger.critical(f"Inference stuck for {elapsed:.0f}s — skipping new submission")
+                            last_future.cancel()
+                            last_future = None
+                            # Skip this chunk
+                        else:
+                            logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference busy ({elapsed:.0f}s)")
+                    elif state.inference_executor._work_queue.qsize() >= 1:
                         logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference queue busy")
                     else:
-                        state.inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
+                        last_future = state.inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
+                        last_future_time = time.time()
 
                 samples_ctx = int(sr * ctx_overlap)
                 if full_audio.shape[0] > samples_ctx:
