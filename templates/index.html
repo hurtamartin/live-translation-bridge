@@ -19,7 +19,7 @@
       <span class="header__icon" id="themeIcon">&#9790;</span>
     </button>
 
-    <div class="header__status" id="statusIndicator">
+    <div class="header__status" id="statusIndicator" role="status" aria-live="polite">
       <span class="status__dot" id="statusDot"></span>
       <span class="status__text" id="statusText"></span>
     </div>
@@ -44,9 +44,9 @@
   </button>
 
   <!-- Language modal (options built dynamically in app.js) -->
-  <div class="modal-overlay" id="langModal">
-    <div class="modal">
-      <h2 class="modal__title" data-i18n="selectLanguage"></h2>
+  <div class="modal-overlay" id="langModal" aria-modal="true">
+    <div class="modal" role="dialog" aria-labelledby="langModalTitle">
+      <h2 class="modal__title" id="langModalTitle" data-i18n="selectLanguage"></h2>
       <div class="modal__options" id="langOptions">
         <!-- Populated by app.js from LANGUAGES config -->
       </div>
@@ -55,9 +55,9 @@
   </div>
 
   <!-- Settings drawer -->
-  <div class="modal-overlay" id="settingsModal">
-    <div class="modal modal--settings">
-      <h2 class="modal__title" data-i18n="settings"></h2>
+  <div class="modal-overlay" id="settingsModal" aria-modal="true">
+    <div class="modal modal--settings" role="dialog" aria-labelledby="settingsModalTitle">
+      <h2 class="modal__title" id="settingsModalTitle" data-i18n="settings"></h2>
 
       <div class="setting">
         <label class="setting__label" for="fontSizeSlider" data-i18n="fontSize"></label>
