@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import os
 import threading
 import queue
 import time
@@ -6,6 +8,7 @@ import json
 import uuid
 import logging
 import collections
+from pathlib import Path
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
@@ -13,8 +16,10 @@ import sounddevice as sd
 import torch
 import torchaudio
 from transformers import SeamlessM4Tv2ForSpeechToText, AutoProcessor
-from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect
+import secrets
+from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from scipy.signal import lfilter
@@ -92,7 +97,32 @@ DEFAULT_CONFIG = {
     "preprocess_auto_language": False,
 }
 
-runtime_config = dict(DEFAULT_CONFIG)
+CONFIG_FILE = Path(__file__).parent / "config.json"
+
+def load_config() -> dict:
+    """Load config from JSON file, falling back to defaults."""
+    config = dict(DEFAULT_CONFIG)
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            for key, value in saved.items():
+                if key in DEFAULT_CONFIG:
+                    config[key] = value
+            logger.info(f"Config loaded from {CONFIG_FILE}")
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}, using defaults")
+    return config
+
+def save_config():
+    """Save current runtime_config to JSON file."""
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(runtime_config, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Failed to save config: {e}")
+
+runtime_config = load_config()
 
 # Validation ranges for config values
 CONFIG_RANGES = {
@@ -117,7 +147,22 @@ start_time = time.time()
 native_sample_rate = 16000
 resampler = None
 _audio_level_db = -60.0
+_audio_level_peak = -60.0
 _audio_level_lock = threading.Lock()
+_audio_history = collections.deque(maxlen=60)  # 60s of 1-per-second samples
+
+# Performance metrics
+_perf_metrics = {
+    "encoder_ms": collections.deque(maxlen=100),
+    "decoder_ms": collections.deque(maxlen=100),
+    "total_translations": 0,
+    "last_inference_time": 0,
+}
+_perf_lock = threading.Lock()
+
+# Translation history
+_translation_history = collections.deque(maxlen=50)
+_translation_history_lock = threading.Lock()
 
 def compute_audio_level(audio_np: np.ndarray) -> float:
     """Compute RMS audio level in dB, clamped to -60 dB."""
@@ -126,6 +171,11 @@ def compute_audio_level(audio_np: np.ndarray) -> float:
         return -60.0
     db = 20.0 * np.log10(rms)
     return float(max(db, -60.0))
+
+def _update_audio_history():
+    """Called once per second to record audio level history."""
+    with _audio_level_lock:
+        _audio_history.append({"t": time.time(), "db": _audio_level_db, "peak": _audio_level_peak})
 
 # --- DEVICE DETECTION ---
 def detect_device():
@@ -300,7 +350,10 @@ def translate_audio(audio_np: np.ndarray, target_langs: list[str]) -> dict[str, 
     with torch.no_grad():
         t_enc = time.time()
         encoder_out = model.get_encoder()(**encoder_kwargs)
-        logger.debug(f"Encoder: {(time.time() - t_enc)*1000:.0f}ms")
+        enc_ms = (time.time() - t_enc) * 1000
+        logger.debug(f"Encoder: {enc_ms:.0f}ms")
+        with _perf_lock:
+            _perf_metrics["encoder_ms"].append(enc_ms)
 
         for lang in target_langs:
             try:
@@ -310,13 +363,27 @@ def translate_audio(audio_np: np.ndarray, target_langs: list[str]) -> dict[str, 
                     encoder_outputs=encoder_out,
                     tgt_lang=lang,
                 )
-                logger.debug(f"Decoder [{lang}]: {(time.time() - t_dec)*1000:.0f}ms")
+                dec_ms = (time.time() - t_dec) * 1000
+                logger.debug(f"Decoder [{lang}]: {dec_ms:.0f}ms")
+                with _perf_lock:
+                    _perf_metrics["decoder_ms"].append(dec_ms)
                 text = processor.decode(output_tokens[0].tolist(), skip_special_tokens=True).strip()
                 text = text.replace("#err", "")
                 if text:
                     results[lang] = text
             except Exception as e:
                 logger.error(f"Translation error for {lang}: {e}")
+
+    # Record metrics and translation history
+    with _perf_lock:
+        _perf_metrics["total_translations"] += 1
+        _perf_metrics["last_inference_time"] = time.time()
+    if results:
+        with _translation_history_lock:
+            _translation_history.append({
+                "time": time.strftime("%H:%M:%S"),
+                "translations": dict(results),
+            })
     return results
 
 # --- SESSION MANAGER ---
@@ -325,6 +392,8 @@ class ClientSession:
     session_id: str
     websocket: WebSocket
     target_lang: str = field(default_factory=lambda: runtime_config["default_target_lang"])
+    connected_at: float = field(default_factory=time.time)
+    client_ip: str = ""
 
 class SessionManager:
     def __init__(self):
@@ -334,7 +403,10 @@ class SessionManager:
     async def connect(self, websocket: WebSocket) -> str:
         await websocket.accept()
         session_id = str(uuid.uuid4())
-        session = ClientSession(session_id=session_id, websocket=websocket)
+        client_ip = ""
+        if websocket.client:
+            client_ip = websocket.client.host
+        session = ClientSession(session_id=session_id, websocket=websocket, client_ip=client_ip)
         with self._lock:
             self._sessions[session_id] = session
         return session_id
@@ -372,6 +444,16 @@ class SessionManager:
     def client_count(self) -> int:
         with self._lock:
             return len(self._sessions)
+
+    def get_sessions_info(self) -> list[dict]:
+        with self._lock:
+            now = time.time()
+            return [{
+                "id": s.session_id[:8],
+                "lang": s.target_lang,
+                "ip": s.client_ip,
+                "connected_for": int(now - s.connected_at),
+            } for s in self._sessions.values()]
 
 manager = SessionManager()
 
@@ -496,11 +578,13 @@ def processing_loop(loop):
             # Resample to 16kHz if needed
             chunk_np = resample_audio(chunk_np, resampler)
 
-            # Compute audio level for VU meter
-            global _audio_level_db
+            # Compute audio level for VU meter + peak hold
+            global _audio_level_db, _audio_level_peak
             level = compute_audio_level(chunk_np)
             with _audio_level_lock:
                 _audio_level_db = level
+                if level > _audio_level_peak:
+                    _audio_level_peak = level
 
             # Pre-allocated buffer: append chunk
             n = chunk_np.shape[0]
@@ -589,18 +673,34 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+# --- ADMIN AUTH ---
+security = HTTPBasic()
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "adminCB"
+
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request):
+async def admin_page(request: Request, _user: str = Depends(verify_admin)):
     return templates.TemplateResponse("admin.html", {"request": request})
 
 # --- API ENDPOINTS ---
 
 @app.get("/api/status")
-async def api_status():
+async def api_status(_user: str = Depends(verify_admin)):
     # Audio stream status
     with audio_stream_lock:
         if audio_stream is not None and audio_stream.active:
@@ -644,7 +744,7 @@ async def api_status():
     })
 
 @app.get("/api/devices")
-async def api_devices():
+async def api_devices(_user: str = Depends(verify_admin)):
     try:
         devices = get_audio_devices()
         return JSONResponse({
@@ -657,7 +757,7 @@ async def api_devices():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/api/devices/select")
-async def api_devices_select(request: Request):
+async def api_devices_select(request: Request, _user: str = Depends(verify_admin)):
     try:
         body = await request.json()
         device_index = body.get("device_index")
@@ -686,11 +786,11 @@ async def api_devices_select(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/config")
-async def api_config_get():
+async def api_config_get(_user: str = Depends(verify_admin)):
     return JSONResponse(dict(runtime_config))
 
 @app.post("/api/config")
-async def api_config_post(request: Request):
+async def api_config_post(request: Request, _user: str = Depends(verify_admin)):
     try:
         body = await request.json()
         errors = {}
@@ -737,14 +837,147 @@ async def api_config_post(request: Request):
         if errors:
             return JSONResponse({"errors": errors, "config": dict(runtime_config)}, status_code=400)
 
+        save_config()
         logger.info(f"Config updated: {body}")
         return JSONResponse(dict(runtime_config))
     except Exception as e:
         logger.error(f"Error updating config: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+# --- B) Config export/import ---
+
+@app.get("/api/config/export")
+async def api_config_export(_user: str = Depends(verify_admin)):
+    return JSONResponse(dict(runtime_config))
+
+@app.post("/api/config/import")
+async def api_config_import(request: Request, _user: str = Depends(verify_admin)):
+    try:
+        body = await request.json()
+        imported = 0
+        for key, value in body.items():
+            if key in DEFAULT_CONFIG:
+                runtime_config[key] = value
+                imported += 1
+        save_config()
+        logger.info(f"Config imported: {imported} keys")
+        return JSONResponse({"ok": True, "imported": imported, "config": dict(runtime_config)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+# --- G) Health endpoint (no auth for monitoring) ---
+
+@app.get("/health")
+async def health_check():
+    with audio_stream_lock:
+        audio_ok = audio_stream is not None and audio_stream.active
+    return JSONResponse({
+        "status": "healthy" if audio_ok else "degraded",
+        "uptime": int(time.time() - start_time),
+        "clients": manager.client_count(),
+        "audio_stream": "running" if audio_ok else "stopped",
+        "model": "loaded",
+    })
+
+# --- G) Sessions, metrics, translation history ---
+
+@app.get("/api/sessions")
+async def api_sessions(_user: str = Depends(verify_admin)):
+    return JSONResponse(manager.get_sessions_info())
+
+@app.get("/api/metrics")
+async def api_metrics(_user: str = Depends(verify_admin)):
+    with _perf_lock:
+        enc = list(_perf_metrics["encoder_ms"])
+        dec = list(_perf_metrics["decoder_ms"])
+        total = _perf_metrics["total_translations"]
+        last_time = _perf_metrics["last_inference_time"]
+    return JSONResponse({
+        "total_translations": total,
+        "avg_encoder_ms": round(sum(enc) / len(enc), 1) if enc else 0,
+        "avg_decoder_ms": round(sum(dec) / len(dec), 1) if dec else 0,
+        "last_encoder_ms": round(enc[-1], 1) if enc else 0,
+        "last_decoder_ms": round(dec[-1], 1) if dec else 0,
+        "last_inference_ago": round(time.time() - last_time, 1) if last_time else None,
+        "gpu_name": torch.cuda.get_device_name(0) if device.type == "cuda" else None,
+        "gpu_memory_used_mb": round(torch.cuda.memory_allocated(0) / 1024 / 1024, 0) if device.type == "cuda" else None,
+        "gpu_memory_total_mb": round(torch.cuda.get_device_properties(0).total_mem / 1024 / 1024, 0) if device.type == "cuda" else None,
+    })
+
+@app.get("/api/translations")
+async def api_translations(_user: str = Depends(verify_admin)):
+    with _translation_history_lock:
+        return JSONResponse(list(_translation_history))
+
+# --- F) Audio history ---
+
+@app.get("/api/audio-history")
+async def api_audio_history(_user: str = Depends(verify_admin)):
+    with _audio_level_lock:
+        return JSONResponse(list(_audio_history))
+
+# --- E) Status WebSocket ---
+
+def _verify_ws_auth(websocket: WebSocket) -> bool:
+    auth_header = websocket.headers.get("authorization", "")
+    if auth_header.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            username, password = decoded.split(":", 1)
+            if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
+                return True
+        except Exception:
+            pass
+    return False
+
+@app.websocket("/api/status/ws")
+async def api_status_ws(websocket: WebSocket):
+    global _audio_level_peak
+    if not _verify_ws_auth(websocket):
+        await websocket.close(code=4401)
+        return
+    await websocket.accept()
+    try:
+        while True:
+            # Build status payload
+            with audio_stream_lock:
+                if audio_stream is not None and audio_stream.active:
+                    dev_idx = runtime_config["audio_device_index"]
+                    dev_name = "default" if dev_idx is None else sd.query_devices(dev_idx)['name']
+                    audio_status = {"status": "running", "device_name": dev_name, "channel": runtime_config["audio_channel"]}
+                else:
+                    audio_status = {"status": "stopped", "device_name": None, "channel": 0}
+            with _audio_level_lock:
+                current_db = _audio_level_db
+                current_peak = _audio_level_peak
+                _audio_level_peak = max(_audio_level_peak - 0.5, _audio_level_db)  # decay peak
+            gpu_name = torch.cuda.get_device_name(0) if device.type == "cuda" else None
+            payload = {
+                "clients": manager.client_count(),
+                "audio_level_db": round(current_db, 1),
+                "audio_level_peak": round(current_peak, 1),
+                "active_languages": sorted(manager.get_unique_languages()),
+                "device": device.type,
+                "uptime": int(time.time() - start_time),
+                "components": {
+                    "model": {"status": "running", "name": MODEL_NAME, "device": device.type, "gpu_name": gpu_name},
+                    "vad": {"status": "running", "type": "silero"},
+                    "audio_stream": audio_status,
+                    "inference_executor": {"status": "running", "pending_tasks": inference_executor._work_queue.qsize()},
+                },
+            }
+            await websocket.send_text(json.dumps(payload))
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+
 @app.websocket("/api/logs")
 async def api_logs_ws(websocket: WebSocket):
+    if not _verify_ws_auth(websocket):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     listener = log_handler.add_listener()
     try:
@@ -794,10 +1027,17 @@ if __name__ == "__main__":
 
     restart_audio_stream(device_idx, runtime_config["audio_channel"])
 
+    async def audio_history_ticker():
+        """Record audio level once per second for history graph."""
+        while True:
+            await asyncio.sleep(1)
+            _update_audio_history()
+
     @app.on_event("startup")
     async def startup_event():
         loop = asyncio.get_running_loop()
         asyncio.create_task(broadcaster())
+        asyncio.create_task(audio_history_ticker())
         processing_thread = threading.Thread(target=processing_loop, args=(loop,), daemon=True)
         processing_thread.start()
 

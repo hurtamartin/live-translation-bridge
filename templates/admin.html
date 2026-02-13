@@ -19,6 +19,20 @@
     </div>
   </header>
 
+  <!-- Toast container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Confirm modal -->
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-dialog">
+      <p class="confirm-dialog__text" id="confirmText"></p>
+      <div class="confirm-dialog__actions">
+        <button class="admin-btn admin-btn--secondary" id="confirmCancel">Zrusit</button>
+        <button class="admin-btn admin-btn--danger" id="confirmOk">Ano, resetovat</button>
+      </div>
+    </div>
+  </div>
+
   <main class="admin-main">
     <!-- A) Status Dashboard -->
     <section class="admin-card">
@@ -81,15 +95,17 @@
       </div>
     </section>
 
-    <!-- B2) VU Meter -->
+    <!-- B2) VU Meter with peak hold -->
     <section class="admin-card">
       <h2 class="admin-card__title">Vstupni signal</h2>
       <div class="audio-meter" id="audioMeter">
         <div class="audio-meter__bar-container">
           <div class="audio-meter__bar" id="audioMeterBar"></div>
+          <div class="audio-meter__peak" id="audioMeterPeak"></div>
         </div>
         <span class="audio-meter__value" id="audioMeterValue">-60 dB</span>
       </div>
+      <canvas class="audio-history" id="audioHistoryCanvas" width="800" height="80"></canvas>
     </section>
 
     <!-- C) Translation Parameters -->
@@ -134,6 +150,9 @@
 
         <div class="admin-form__actions">
           <button class="admin-btn admin-btn--secondary" id="resetConfig">Vychozi</button>
+          <button class="admin-btn admin-btn--secondary" id="exportConfig">Export</button>
+          <button class="admin-btn admin-btn--secondary" id="importConfig">Import</button>
+          <input type="file" id="importConfigFile" accept=".json" style="display:none">
           <span class="save-status" id="configStatus"></span>
         </div>
       </div>
@@ -213,6 +232,55 @@
         <div class="admin-form__actions">
           <span class="save-status" id="preprocessStatus"></span>
         </div>
+      </div>
+    </section>
+
+    <!-- G) Performance Metrics -->
+    <section class="admin-card">
+      <h2 class="admin-card__title">Vykon</h2>
+      <div class="metrics-grid" id="metricsGrid">
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricTranslations">--</div>
+          <div class="metric-item__label">Celkem prekladu</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricEncoder">--</div>
+          <div class="metric-item__label">Encoder (avg)</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricDecoder">--</div>
+          <div class="metric-item__label">Decoder (avg)</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricGpu">--</div>
+          <div class="metric-item__label">GPU pamet</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- G) Connected Sessions -->
+    <section class="admin-card">
+      <h2 class="admin-card__title">Pripojeni klienti</h2>
+      <div class="sessions-table-wrap">
+        <table class="sessions-table" id="sessionsTable">
+          <thead>
+            <tr><th>ID</th><th>Jazyk</th><th>IP</th><th>Pripojeno</th></tr>
+          </thead>
+          <tbody id="sessionsBody">
+            <tr><td colspan="4" class="sessions-table__empty">Zadni klienti</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- G) Translation History -->
+    <section class="admin-card">
+      <div class="admin-card__header">
+        <h2 class="admin-card__title">Historie prekladu</h2>
+        <button class="admin-btn admin-btn--small" id="refreshTranslations">Obnovit</button>
+      </div>
+      <div class="translation-history" id="translationHistory">
+        <div class="translation-history__empty">Zatim zadne preklady</div>
       </div>
     </section>
 

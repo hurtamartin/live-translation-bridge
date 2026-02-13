@@ -1,15 +1,20 @@
 """Lightweight preview server - serves only the frontend without ML/audio dependencies."""
 import asyncio
+import base64
 import collections
 import json
 import logging
 import math
 import random
+import secrets
 import time
 import uuid
-from dataclasses import dataclass
-from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
@@ -65,8 +70,10 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
 logger.addHandler(console_handler)
 
-# --- Mock runtime config ---
-runtime_config = {
+# --- Config persistence ---
+CONFIG_FILE = Path(__file__).parent / "config.json"
+
+DEFAULT_CONFIG = {
     "audio_device_index": None,
     "audio_channel": 0,
     "sample_rate": 16000,
@@ -75,7 +82,6 @@ runtime_config = {
     "max_chunk_duration": 12.0,
     "context_overlap": 0.5,
     "default_target_lang": "ces",
-    # Audio preprocessing
     "preprocess_noise_gate": False,
     "preprocess_noise_gate_threshold": -40.0,
     "preprocess_normalize": False,
@@ -95,6 +101,54 @@ CONFIG_RANGES = {
     "preprocess_highpass_cutoff": (20, 300),
 }
 
+def load_config() -> dict:
+    config = dict(DEFAULT_CONFIG)
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            for key, value in saved.items():
+                if key in DEFAULT_CONFIG:
+                    config[key] = value
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}, using defaults")
+    return config
+
+def save_config():
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(runtime_config, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Failed to save config: {e}")
+
+runtime_config = load_config()
+
+# --- Mock audio level & metrics ---
+_audio_level_db = -60.0
+_audio_level_peak = -60.0
+_audio_history: collections.deque = collections.deque(maxlen=60)
+
+_perf_metrics = {
+    "encoder_ms": collections.deque(maxlen=100),
+    "decoder_ms": collections.deque(maxlen=100),
+    "total_translations": 0,
+    "last_inference_time": None,
+}
+
+_translation_history: collections.deque = collections.deque(maxlen=50)
+
+def _update_audio_history():
+    global _audio_level_db, _audio_level_peak
+    # Mock: simulate fluctuating audio level
+    _audio_level_db = -30 + 15 * math.sin(time.time() * 0.5) + random.uniform(-3, 3)
+    _audio_level_peak = max(_audio_level_peak - 0.5, _audio_level_db)
+    _audio_history.append({
+        "time": time.time(),
+        "rms_db": round(_audio_level_db, 1),
+        "peak_db": round(_audio_level_peak, 1),
+    })
+
+# --- Demo data ---
 DEMOS = {
     "ces": [
         "Vítejte na dnešním shromáždění.",
@@ -157,22 +211,56 @@ class ClientSession:
     session_id: str
     websocket: WebSocket
     target_lang: str = DEFAULT_TARGET_LANG
+    connected_at: float = field(default_factory=time.time)
+    client_ip: str = ""
 
 sessions: dict[str, ClientSession] = {}
+
+# --- ADMIN AUTH ---
+security = HTTPBasic()
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "adminCB"
+
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
+def _verify_ws_auth(websocket: WebSocket) -> bool:
+    auth_header = websocket.headers.get("authorization", "")
+    if auth_header.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            username, password = decoded.split(":", 1)
+            if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
+                return True
+        except Exception:
+            pass
+    return False
+
+# --- ROUTES ---
 
 @app.get("/", response_class=HTMLResponse)
 async def get(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request):
+async def admin_page(request: Request, _user: str = Depends(verify_admin)):
     return templates.TemplateResponse("admin.html", {"request": request})
 
 @app.get("/api/status")
-async def api_status():
+async def api_status(_user: str = Depends(verify_admin)):
     return JSONResponse({
         "status": "ok",
         "clients": len(sessions),
+        "audio_level_db": round(_audio_level_db, 1),
+        "audio_level_peak": round(_audio_level_peak, 1),
         "active_languages": sorted({s.target_lang for s in sessions.values()}),
         "device": "preview",
         "uptime": int(time.time() - start_time),
@@ -186,7 +274,7 @@ async def api_status():
     })
 
 @app.get("/api/devices")
-async def api_devices():
+async def api_devices(_user: str = Depends(verify_admin)):
     return JSONResponse({
         "devices": [
             {
@@ -209,7 +297,7 @@ async def api_devices():
     })
 
 @app.post("/api/devices/select")
-async def api_devices_select(request: Request):
+async def api_devices_select(request: Request, _user: str = Depends(verify_admin)):
     body = await request.json()
     device_index = body.get("device_index")
     channel = body.get("channel", 0)
@@ -219,11 +307,11 @@ async def api_devices_select(request: Request):
     return JSONResponse({"ok": True})
 
 @app.get("/api/config")
-async def api_config_get():
+async def api_config_get(_user: str = Depends(verify_admin)):
     return JSONResponse(dict(runtime_config))
 
 @app.post("/api/config")
-async def api_config_post(request: Request):
+async def api_config_post(request: Request, _user: str = Depends(verify_admin)):
     body = await request.json()
     errors = {}
     for key, value in body.items():
@@ -238,17 +326,129 @@ async def api_config_post(request: Request):
         runtime_config[key] = value
     if errors:
         return JSONResponse({"errors": errors, "config": dict(runtime_config)}, status_code=400)
+    save_config()
     logger.info(f"Config updated: {body}")
     return JSONResponse(dict(runtime_config))
 
+# --- Config export/import ---
+
+@app.get("/api/config/export")
+async def api_config_export(_user: str = Depends(verify_admin)):
+    return JSONResponse(dict(runtime_config))
+
+@app.post("/api/config/import")
+async def api_config_import(request: Request, _user: str = Depends(verify_admin)):
+    try:
+        body = await request.json()
+        imported = 0
+        for key, value in body.items():
+            if key in DEFAULT_CONFIG:
+                runtime_config[key] = value
+                imported += 1
+        save_config()
+        logger.info(f"Config imported: {imported} keys")
+        return JSONResponse({"ok": True, "imported": imported, "config": dict(runtime_config)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+# --- Health endpoint (no auth) ---
+
+@app.get("/health")
+async def health_check():
+    return JSONResponse({
+        "status": "healthy",
+        "uptime": int(time.time() - start_time),
+        "clients": len(sessions),
+        "audio_stream": "running",
+        "model": "preview-mock",
+    })
+
+# --- Sessions, metrics, translation history ---
+
+@app.get("/api/sessions")
+async def api_sessions(_user: str = Depends(verify_admin)):
+    now = time.time()
+    result = []
+    for s in sessions.values():
+        result.append({
+            "id": s.session_id[:8],
+            "lang": s.target_lang,
+            "ip": s.client_ip,
+            "connected_for": int(now - s.connected_at),
+        })
+    return JSONResponse(result)
+
+@app.get("/api/metrics")
+async def api_metrics(_user: str = Depends(verify_admin)):
+    enc = list(_perf_metrics["encoder_ms"])
+    dec = list(_perf_metrics["decoder_ms"])
+    total = _perf_metrics["total_translations"]
+    last_time = _perf_metrics["last_inference_time"]
+    return JSONResponse({
+        "total_translations": total,
+        "avg_encoder_ms": round(sum(enc) / len(enc), 1) if enc else 0,
+        "avg_decoder_ms": round(sum(dec) / len(dec), 1) if dec else 0,
+        "last_encoder_ms": round(enc[-1], 1) if enc else 0,
+        "last_decoder_ms": round(dec[-1], 1) if dec else 0,
+        "last_inference_ago": round(time.time() - last_time, 1) if last_time else None,
+        "gpu_name": None,
+        "gpu_memory_used_mb": None,
+        "gpu_memory_total_mb": None,
+    })
+
+@app.get("/api/translations")
+async def api_translations(_user: str = Depends(verify_admin)):
+    return JSONResponse(list(_translation_history))
+
+# --- Audio history ---
+
+@app.get("/api/audio-history")
+async def api_audio_history(_user: str = Depends(verify_admin)):
+    return JSONResponse(list(_audio_history))
+
 @app.get("/api/audio-level")
-async def api_audio_level():
-    # Mock: simulate fluctuating audio level between -50 and -5 dB
-    db = -30 + 15 * math.sin(time.time() * 0.5) + random.uniform(-3, 3)
-    return JSONResponse({"rms_db": round(db, 1)})
+async def api_audio_level(_user: str = Depends(verify_admin)):
+    return JSONResponse({"rms_db": round(_audio_level_db, 1)})
+
+# --- Status WebSocket ---
+
+@app.websocket("/api/status/ws")
+async def api_status_ws(websocket: WebSocket):
+    global _audio_level_peak
+    if not _verify_ws_auth(websocket):
+        await websocket.close(code=4401)
+        return
+    await websocket.accept()
+    try:
+        while True:
+            payload = {
+                "clients": len(sessions),
+                "audio_level_db": round(_audio_level_db, 1),
+                "audio_level_peak": round(_audio_level_peak, 1),
+                "active_languages": sorted({s.target_lang for s in sessions.values()}),
+                "device": "cpu",
+                "uptime": int(time.time() - start_time),
+                "components": {
+                    "model": {"status": "running", "name": "preview-mock", "device": "cpu", "gpu_name": None},
+                    "vad": {"status": "running", "type": "mock"},
+                    "audio_stream": {"status": "running", "device_name": "Preview (mock)", "channel": 0},
+                    "inference_executor": {"status": "running", "pending_tasks": 0},
+                },
+            }
+            await websocket.send_text(json.dumps(payload))
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+
+# --- Log WebSocket ---
 
 @app.websocket("/api/logs")
 async def api_logs_ws(websocket: WebSocket):
+    if not _verify_ws_auth(websocket):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     listener = log_handler.add_listener()
     try:
@@ -264,11 +464,18 @@ async def api_logs_ws(websocket: WebSocket):
     finally:
         log_handler.remove_listener(listener)
 
+# --- Client WebSocket ---
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     session_id = str(uuid.uuid4())
-    sessions[session_id] = ClientSession(session_id=session_id, websocket=websocket)
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    sessions[session_id] = ClientSession(
+        session_id=session_id,
+        websocket=websocket,
+        client_ip=client_ip,
+    )
     logger.info(f"Client connected: {session_id[:8]}")
     try:
         while True:
@@ -281,12 +488,13 @@ async def websocket_endpoint(websocket: WebSocket):
         sessions.pop(session_id, None)
         logger.info(f"Client disconnected: {session_id[:8]}")
 
+# --- Background tasks ---
+
 async def demo_subtitles():
     """Send demo subtitles every few seconds, per-session language."""
     idx = 0
     await asyncio.sleep(3)
     while True:
-        # Group sessions by language
         lang_sessions: dict[str, list[ClientSession]] = {}
         for s in list(sessions.values()):
             lang_sessions.setdefault(s.target_lang, []).append(s)
@@ -300,12 +508,32 @@ async def demo_subtitles():
                     await session.websocket.send_text(payload)
                 except Exception:
                     pass
+
+        # Mock: add to translation history
+        if lang_sessions:
+            _perf_metrics["total_translations"] += 1
+            _perf_metrics["last_inference_time"] = time.time()
+            _perf_metrics["encoder_ms"].append(random.uniform(20, 80))
+            _perf_metrics["decoder_ms"].append(random.uniform(50, 200))
+            for lang in lang_sessions:
+                demos = DEMOS.get(lang, DEMOS["ces"])
+                _translation_history.appendleft({
+                    "timestamp": time.time(),
+                    "translations": {lang: demos[idx % len(demos)]},
+                })
+
         idx += 1
         await asyncio.sleep(4)
+
+async def audio_history_ticker():
+    while True:
+        _update_audio_history()
+        await asyncio.sleep(1)
 
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(demo_subtitles())
+    asyncio.create_task(audio_history_ticker())
 
 if __name__ == "__main__":
     logger.info("Preview server at http://localhost:8888")
