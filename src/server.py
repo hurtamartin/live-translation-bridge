@@ -557,8 +557,11 @@ def processing_loop(loop):
 
 async def broadcaster():
     """Send translated texts to clients per their language."""
-    while True:
-        results = await state.translation_queue.get()
+    while not state.stop_event.is_set():
+        try:
+            results = await asyncio.wait_for(state.translation_queue.get(), timeout=1.0)
+        except asyncio.TimeoutError:
+            continue
         tasks = []
         for lang, text in results.items():
             logger.info(f"[{lang}] {text}")
@@ -568,9 +571,56 @@ async def broadcaster():
 
 async def audio_history_ticker():
     """Record audio level once per second for history graph."""
-    while True:
+    while not state.stop_event.is_set():
         await asyncio.sleep(1)
         state._update_audio_history()
+
+
+def audio_watchdog():
+    """Monitor audio device health and attempt reconnection on failure.
+
+    Runs in its own thread. Uses state.audio_device_error (threading.Event)
+    signaled by audio callbacks when device errors occur.
+    """
+    RECONNECT_DELAYS = [1, 2, 4, 8, 16, 30]  # exponential backoff, max 30s
+
+    while not state.stop_event.is_set():
+        # Wait for error signal or periodic check (5s)
+        signaled = state.audio_device_error.wait(timeout=5.0)
+
+        if state.stop_event.is_set():
+            break
+
+        # Check if stream is dead (either error signaled or stream inactive)
+        needs_restart = signaled
+        if not needs_restart:
+            with state.audio_stream_lock:
+                if state.audio_stream is not None and not state.audio_stream.active:
+                    needs_restart = True
+
+        if not needs_restart:
+            continue
+
+        state.audio_device_error.clear()
+        logger.warning("Audio device error detected, attempting reconnection...")
+
+        for attempt, delay in enumerate(RECONNECT_DELAYS):
+            if state.stop_event.is_set():
+                return
+            try:
+                device_idx = runtime_config["audio_device_index"]
+                restart_audio_stream(device_idx, runtime_config["audio_channel"], state)
+                logger.info(f"Audio device reconnected (attempt {attempt + 1})")
+                break
+            except Exception as e:
+                logger.warning(f"Audio reconnect attempt {attempt + 1} failed: {e}")
+                # Wait before next attempt, but check stop_event
+                for _ in range(int(delay * 10)):
+                    if state.stop_event.is_set():
+                        return
+                    time.sleep(0.1)
+        else:
+            logger.error("Audio reconnection failed after all attempts. Waiting for next error signal.")
 
 
 def start_server():
@@ -578,15 +628,65 @@ def start_server():
     import uvicorn
 
     device_idx = runtime_config["audio_device_index"]
-    restart_audio_stream(device_idx, runtime_config["audio_channel"], state)
+    try:
+        restart_audio_stream(device_idx, runtime_config["audio_channel"], state)
+    except Exception as e:
+        logger.error(f"Initial audio stream failed: {e} — will retry via watchdog")
 
     @app.on_event("startup")
     async def startup_event():
         loop = asyncio.get_running_loop()
         asyncio.create_task(broadcaster())
         asyncio.create_task(audio_history_ticker())
-        processing_thread = threading.Thread(target=processing_loop, args=(loop,), daemon=True)
-        processing_thread.start()
+        # Audio watchdog runs in its own thread (uses blocking wait/sleep)
+        watchdog_thread = threading.Thread(target=audio_watchdog, daemon=True)
+        watchdog_thread.start()
+        # Processing thread — NOT daemon, coordinated shutdown via stop_event
+        state.processing_thread = threading.Thread(target=processing_loop, args=(loop,))
+        state.processing_thread.start()
 
-    logger.info("Starting Web Server on port 8888...")
-    uvicorn.run(app, host="0.0.0.0", port=8888, log_level="info")
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        logger.info("Shutting down...")
+        # 1. Signal all threads to stop
+        state.stop_event.set()
+        state.audio_device_error.set()  # unblock watchdog
+
+        # 2. Wait for processing thread to finish current work
+        if state.processing_thread and state.processing_thread.is_alive():
+            state.processing_thread.join(timeout=10)
+            if state.processing_thread.is_alive():
+                logger.warning("Processing thread did not stop in time")
+
+        # 3. Shutdown inference executor
+        state.inference_executor.shutdown(wait=False)
+
+        # 4. Stop audio stream
+        with state.audio_stream_lock:
+            if state.audio_stream is not None:
+                try:
+                    state.audio_stream.stop()
+                except Exception:
+                    pass
+                try:
+                    state.audio_stream.close()
+                except Exception:
+                    pass
+                state.audio_stream = None
+
+        # 5. Save config
+        save_config()
+
+        # 6. Release GPU memory
+        if state.device and state.device.type == "cuda":
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        logger.info("Shutdown complete.")
+
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8888"))
+    logger.info(f"Starting Web Server on {host}:{port}...")
+    uvicorn.run(app, host=host, port=port, log_level="info")

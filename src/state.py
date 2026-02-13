@@ -12,11 +12,12 @@ from src.audio.capture import detect_device, load_vad
 from src.translation.engine import load_model, warmup_model
 
 # Audio pipeline
-audio_queue = queue.Queue()
+audio_queue = queue.Queue(maxsize=500)
 translation_queue = asyncio.Queue()
 stop_event = threading.Event()
 audio_stream = None
 audio_stream_lock = threading.Lock()
+audio_device_error = threading.Event()  # signaled when audio device fails
 start_time = time.time()
 native_sample_rate = 16000
 resampler = None
@@ -42,6 +43,7 @@ _translation_history_lock = threading.Lock()
 
 # Singletons (initialized in initialize())
 inference_executor = ThreadPoolExecutor(max_workers=1)
+processing_thread = None  # set in start_server()
 manager = SessionManager()
 device = None
 dtype = None

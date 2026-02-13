@@ -82,6 +82,8 @@ ADMIN_PASSWORD=admin
 | `ADMIN_PASSWORD` | `admin` | Admin panel login password |
 | `CORS_ORIGINS` | *(empty — CORS disabled)* | Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`) |
 | `MAX_CLIENTS` | `200` | Maximum concurrent WebSocket viewer connections |
+| `HOST` | `0.0.0.0` | Server bind address |
+| `PORT` | `8888` | Server port |
 
 > **Note:** A warning is logged at startup if default credentials are used.
 
