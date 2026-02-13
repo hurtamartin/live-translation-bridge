@@ -49,8 +49,17 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121
 
 ## Usage
 
+The easiest way to run the application is using the provided launch scripts, which automatically set up a virtual environment and install all dependencies:
+
+**Windows:**
+```cmd
+run_translation.bat
+```
+
+**macOS / Linux:**
 ```bash
-python app.py
+chmod +x run_translation.sh
+./run_translation.sh
 ```
 
 The server starts on `http://0.0.0.0:8888`.
@@ -58,11 +67,22 @@ The server starts on `http://0.0.0.0:8888`.
 - **Viewer page**: `http://localhost:8888` — select language, view live subtitles
 - **Admin panel**: `http://localhost:8888/admin` — configure audio device, tuning parameters, monitor status
 
-On Windows, you can also use the provided batch script:
+### Uninstall
 
+To remove the virtual environment, downloaded AI models, and generated config:
+
+**Windows:**
 ```cmd
-run_translation.bat
+uninstall.bat
 ```
+
+**macOS / Linux:**
+```bash
+chmod +x uninstall.sh
+./uninstall.sh
+```
+
+The scripts will ask for confirmation before deleting anything. Source files are not removed.
 
 ## Configuration
 
