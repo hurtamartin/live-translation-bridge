@@ -10,19 +10,37 @@
 </head>
 <body>
   <header class="admin-header">
-    <h1 class="admin-header__title">Admin Panel</h1>
+    <h1 class="admin-header__title" data-i18n="adminTitle">Admin Panel</h1>
     <div class="admin-header__actions">
-      <a href="/" class="admin-header__link">Hlavni stranka</a>
+      <select class="admin-lang-select" id="adminLangSelect">
+        <option value="cs">CZ</option>
+        <option value="en">EN</option>
+      </select>
+      <a href="/" class="admin-header__link" data-i18n="mainPage">Hlavni stranka</a>
       <button class="header__btn" id="themeToggle" aria-label="Toggle theme">
         <span class="header__icon" id="themeIcon">&#9790;</span>
       </button>
     </div>
   </header>
 
+  <!-- Toast container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Confirm modal -->
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-dialog">
+      <p class="confirm-dialog__text" id="confirmText"></p>
+      <div class="confirm-dialog__actions">
+        <button class="admin-btn admin-btn--secondary" id="confirmCancel" data-i18n="confirmCancel">Zrusit</button>
+        <button class="admin-btn admin-btn--danger" id="confirmOk" data-i18n="confirmReset">Ano, resetovat</button>
+      </div>
+    </div>
+  </div>
+
   <main class="admin-main">
     <!-- A) Status Dashboard -->
     <section class="admin-card">
-      <h2 class="admin-card__title">Status</h2>
+      <h2 class="admin-card__title" data-i18n="statusTitle">Status</h2>
       <div class="status-grid" id="statusGrid">
         <div class="status-item">
           <span class="status-item__dot" id="dotModel"></span>
@@ -54,78 +72,80 @@
         </div>
       </div>
       <div class="status-info" id="statusInfo">
-        <span id="infoClients">Klienti: --</span>
-        <span id="infoLanguages">Jazyky: --</span>
-        <span id="infoDevice">Hardware: --</span>
-        <span id="infoUptime">Uptime: --</span>
+        <span id="infoClients" data-i18n="clients">Klienti</span>
+        <span id="infoLanguages" data-i18n="languages">Jazyky</span>
+        <span id="infoDevice" data-i18n="hardware">Hardware</span>
+        <span id="infoUptime" data-i18n="uptime">Uptime</span>
       </div>
     </section>
 
     <!-- B) Audio Device -->
     <section class="admin-card">
-      <h2 class="admin-card__title">Audio zarizeni</h2>
+      <h2 class="admin-card__title" data-i18n="audioDeviceTitle">Audio zarizeni</h2>
       <div class="admin-form">
-        <label class="admin-label" for="deviceSelect">Zarizeni</label>
+        <label class="admin-label" for="deviceSelect" data-i18n="device">Zarizeni</label>
         <select class="admin-select" id="deviceSelect">
-          <option value="">Nacitam...</option>
+          <option value="" data-i18n="loading">Nacitam...</option>
         </select>
 
-        <label class="admin-label" for="channelSelect">Kanal</label>
+        <label class="admin-label" for="channelSelect" data-i18n="channel">Kanal</label>
         <select class="admin-select" id="channelSelect">
           <option value="0">1 (Mono)</option>
         </select>
 
         <div class="admin-form__actions">
-          <button class="admin-btn admin-btn--primary" id="applyDevice">Pouzit</button>
+          <button class="admin-btn admin-btn--primary" id="applyDevice" data-i18n="apply">Pouzit</button>
         </div>
       </div>
     </section>
 
-    <!-- B2) VU Meter -->
+    <!-- B2) VU Meter with peak hold -->
     <section class="admin-card">
-      <h2 class="admin-card__title">Vstupni signal</h2>
+      <h2 class="admin-card__title" data-i18n="inputSignalTitle">Vstupni signal</h2>
       <div class="audio-meter" id="audioMeter">
         <div class="audio-meter__bar-container">
           <div class="audio-meter__bar" id="audioMeterBar"></div>
+          <div class="audio-meter__peak" id="audioMeterPeak"></div>
         </div>
         <span class="audio-meter__value" id="audioMeterValue">-60 dB</span>
       </div>
+      <canvas class="audio-history" id="audioHistoryCanvas" width="800" height="80"></canvas>
     </section>
 
     <!-- C) Translation Parameters -->
     <section class="admin-card">
-      <h2 class="admin-card__title">Parametry prekladu</h2>
+      <h2 class="admin-card__title" data-i18n="translationParamsTitle">Parametry prekladu</h2>
       <div class="admin-form">
         <div class="admin-slider-group">
-          <label class="admin-label">Silence Duration</label>
+          <label class="admin-label" data-i18n="silenceDuration">Silence Duration</label>
           <input type="range" class="admin-slider" id="silenceDuration" min="0.3" max="3.0" step="0.1" value="0.8">
           <span class="admin-slider__value" id="silenceDurationVal">0.8s</span>
         </div>
 
         <div class="admin-slider-group">
-          <label class="admin-label">Min Chunk Duration</label>
+          <label class="admin-label" data-i18n="minChunkDuration">Min Chunk Duration</label>
           <input type="range" class="admin-slider" id="minChunkDuration" min="0.5" max="5.0" step="0.1" value="1.5">
           <span class="admin-slider__value" id="minChunkDurationVal">1.5s</span>
         </div>
 
         <div class="admin-slider-group">
-          <label class="admin-label">Max Chunk Duration</label>
+          <label class="admin-label" data-i18n="maxChunkDuration">Max Chunk Duration</label>
           <input type="range" class="admin-slider" id="maxChunkDuration" min="5.0" max="30.0" step="1.0" value="12.0">
           <span class="admin-slider__value" id="maxChunkDurationVal">12.0s</span>
         </div>
 
         <div class="admin-slider-group">
-          <label class="admin-label">Context Overlap</label>
+          <label class="admin-label" data-i18n="contextOverlap">Context Overlap</label>
           <input type="range" class="admin-slider" id="contextOverlap" min="0.0" max="2.0" step="0.1" value="0.5">
           <span class="admin-slider__value" id="contextOverlapVal">0.5s</span>
         </div>
 
         <div class="admin-slider-group">
-          <label class="admin-label">Default Target Language</label>
+          <label class="admin-label" data-i18n="defaultTargetLang">Default Target Language</label>
           <select class="admin-select" id="defaultTargetLang">
             <option value="ces">Czech</option>
             <option value="eng">English</option>
-            <option value="rus">Russian</option>
+            <option value="spa">Spanish</option>
             <option value="ukr">Ukrainian</option>
             <option value="deu">German</option>
             <option value="pol">Polish</option>
@@ -133,7 +153,10 @@
         </div>
 
         <div class="admin-form__actions">
-          <button class="admin-btn admin-btn--secondary" id="resetConfig">Vychozi</button>
+          <button class="admin-btn admin-btn--secondary" id="resetConfig" data-i18n="defaults">Vychozi</button>
+          <button class="admin-btn admin-btn--secondary" id="exportConfig" data-i18n="export">Export</button>
+          <button class="admin-btn admin-btn--secondary" id="importConfig" data-i18n="import">Import</button>
+          <input type="file" id="importConfigFile" accept=".json" style="display:none">
           <span class="save-status" id="configStatus"></span>
         </div>
       </div>
@@ -141,8 +164,8 @@
 
     <!-- D) Audio Preprocessing -->
     <section class="admin-card">
-      <h2 class="admin-card__title">Audio preprocessing</h2>
-      <p class="admin-card__desc">Zpracovani vstupniho signalu pred odeslanim do modelu. Zapnete jen to, co potrebujete.</p>
+      <h2 class="admin-card__title" data-i18n="preprocessingTitle">Audio preprocessing</h2>
+      <p class="admin-card__desc" data-i18n="preprocessingDesc">Zpracovani vstupniho signalu pred odeslanim do modelu. Zapnete jen to, co potrebujete.</p>
       <div class="admin-form">
 
         <!-- Noise Gate -->
@@ -150,13 +173,13 @@
           <div class="preprocess-item__header">
             <label class="preprocess-toggle">
               <input type="checkbox" id="ppNoiseGate">
-              <span class="preprocess-toggle__label">Noise Gate</span>
+              <span class="preprocess-toggle__label" data-i18n="noiseGate">Noise Gate</span>
             </label>
-            <span class="preprocess-item__hint">Ztisi audio pod prahem hlasitosti</span>
+            <span class="preprocess-item__hint" data-i18n="noiseGateHint">Ztisi audio pod prahem hlasitosti</span>
           </div>
           <div class="preprocess-item__settings" id="ppNoiseGateSettings">
             <div class="admin-slider-group">
-              <label class="admin-label">Threshold</label>
+              <label class="admin-label" data-i18n="threshold">Threshold</label>
               <input type="range" class="admin-slider" id="ppNoiseGateThreshold" min="-60" max="-10" step="1" value="-40">
               <span class="admin-slider__value" id="ppNoiseGateThresholdVal">-40 dB</span>
             </div>
@@ -168,13 +191,13 @@
           <div class="preprocess-item__header">
             <label class="preprocess-toggle">
               <input type="checkbox" id="ppNormalize">
-              <span class="preprocess-toggle__label">Normalizace hlasitosti</span>
+              <span class="preprocess-toggle__label" data-i18n="volumeNormalize">Normalizace hlasitosti</span>
             </label>
-            <span class="preprocess-item__hint">Vyrovnava uroven hlasitosti</span>
+            <span class="preprocess-item__hint" data-i18n="volumeNormalizeHint">Vyrovnava uroven hlasitosti</span>
           </div>
           <div class="preprocess-item__settings" id="ppNormalizeSettings">
             <div class="admin-slider-group">
-              <label class="admin-label">Target level</label>
+              <label class="admin-label" data-i18n="targetLevel">Target level</label>
               <input type="range" class="admin-slider" id="ppNormalizeTarget" min="-20" max="0" step="1" value="-3">
               <span class="admin-slider__value" id="ppNormalizeTargetVal">-3 dB</span>
             </div>
@@ -186,13 +209,13 @@
           <div class="preprocess-item__header">
             <label class="preprocess-toggle">
               <input type="checkbox" id="ppHighpass">
-              <span class="preprocess-toggle__label">High-pass filtr</span>
+              <span class="preprocess-toggle__label" data-i18n="highpassFilter">High-pass filtr</span>
             </label>
-            <span class="preprocess-item__hint">Odrizne hluboke frekvence pod reci</span>
+            <span class="preprocess-item__hint" data-i18n="highpassHint">Odrizne hluboke frekvence pod reci</span>
           </div>
           <div class="preprocess-item__settings" id="ppHighpassSettings">
             <div class="admin-slider-group">
-              <label class="admin-label">Cutoff</label>
+              <label class="admin-label" data-i18n="cutoff">Cutoff</label>
               <input type="range" class="admin-slider" id="ppHighpassCutoff" min="20" max="300" step="10" value="80">
               <span class="admin-slider__value" id="ppHighpassCutoffVal">80 Hz</span>
             </div>
@@ -204,9 +227,9 @@
           <div class="preprocess-item__header">
             <label class="preprocess-toggle">
               <input type="checkbox" id="ppAutoLang">
-              <span class="preprocess-toggle__label">Automaticka detekce zdrojoveho jazyka</span>
+              <span class="preprocess-toggle__label" data-i18n="autoLangDetect">Automaticka detekce zdrojoveho jazyka</span>
             </label>
-            <span class="preprocess-item__hint">Model se pokusi detekovat jazyk reci</span>
+            <span class="preprocess-item__hint" data-i18n="autoLangHint">Model se pokusi detekovat jazyk reci</span>
           </div>
         </div>
 
@@ -216,15 +239,69 @@
       </div>
     </section>
 
+    <!-- G) Performance Metrics -->
+    <section class="admin-card">
+      <h2 class="admin-card__title" data-i18n="performanceTitle">Vykon</h2>
+      <div class="metrics-grid" id="metricsGrid">
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricTranslations">--</div>
+          <div class="metric-item__label" data-i18n="totalTranslations">Celkem prekladu</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricEncoder">--</div>
+          <div class="metric-item__label" data-i18n="encoderAvg">Encoder (avg)</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricDecoder">--</div>
+          <div class="metric-item__label" data-i18n="decoderAvg">Decoder (avg)</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricGpu">--</div>
+          <div class="metric-item__label" data-i18n="gpuMemory">GPU pamet</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- G) Connected Sessions -->
+    <section class="admin-card">
+      <h2 class="admin-card__title" data-i18n="connectedClientsTitle">Pripojeni klienti</h2>
+      <div class="sessions-table-wrap">
+        <table class="sessions-table" id="sessionsTable">
+          <thead>
+            <tr>
+              <th data-i18n="thId">ID</th>
+              <th data-i18n="thLang">Jazyk</th>
+              <th data-i18n="thIp">IP</th>
+              <th data-i18n="thConnected">Pripojeno</th>
+            </tr>
+          </thead>
+          <tbody id="sessionsBody">
+            <tr><td colspan="4" class="sessions-table__empty" data-i18n="noClients">Zadni klienti</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- G) Translation History -->
+    <section class="admin-card">
+      <div class="admin-card__header">
+        <h2 class="admin-card__title" data-i18n="translationHistoryTitle">Historie prekladu</h2>
+        <button class="admin-btn admin-btn--small" id="refreshTranslations" data-i18n="refresh">Obnovit</button>
+      </div>
+      <div class="translation-history" id="translationHistory">
+        <div class="translation-history__empty" data-i18n="noTranslations">Zatim zadne preklady</div>
+      </div>
+    </section>
+
     <!-- E) Real-time Log -->
     <section class="admin-card admin-card--log">
       <div class="admin-card__header">
-        <h2 class="admin-card__title">Log</h2>
+        <h2 class="admin-card__title" data-i18n="logTitle">Log</h2>
         <div>
           <label class="admin-label--inline">
-            <input type="checkbox" id="logAutoScroll" checked> Auto-scroll
+            <input type="checkbox" id="logAutoScroll" checked> <span data-i18n="autoScroll">Auto-scroll</span>
           </label>
-          <button class="admin-btn admin-btn--small" id="clearLog">Vymazat</button>
+          <button class="admin-btn admin-btn--small" id="clearLog" data-i18n="clearLog">Vymazat</button>
         </div>
       </div>
       <div class="log-container" id="logContainer"></div>
