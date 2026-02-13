@@ -114,14 +114,14 @@ DEMOS = {
         "Thank you for your participation.",
         "Now we move to the main point of the agenda.",
     ],
-    "rus": [
-        "Добро пожаловать на сегодняшнее собрание.",
-        "Это пример переведённого текста.",
-        "Сегодня мы будем говорить о важной теме.",
-        "Так будут выглядеть субтитры.",
-        "Пожалуйста, включите субтитры на своём языке.",
-        "Спасибо за ваше участие.",
-        "Теперь перейдём к главному пункту повестки дня.",
+    "spa": [
+        "Bienvenidos a la reunión de hoy.",
+        "Este es un ejemplo de texto traducido.",
+        "Hoy hablaremos sobre un tema importante.",
+        "Así se verán los subtítulos.",
+        "Por favor, active los subtítulos en su idioma.",
+        "Gracias por su participación.",
+        "Ahora pasamos al punto principal de la agenda.",
     ],
     "ukr": [
         "Ласкаво просимо на сьогоднішнє зібрання.",
