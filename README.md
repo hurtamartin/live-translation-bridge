@@ -5,12 +5,14 @@ Real-time speech translation system that captures audio from a microphone, trans
 ## Features
 
 - **Real-time speech-to-text translation** using `facebook/seamless-m4t-v2-large`
-- **6 target languages**: Czech, English, Russian, Ukrainian, German, Polish
+- **6 target languages**: Czech, English, Spanish, Ukrainian, German, Polish
 - **Per-client language selection** — each viewer picks their own language
 - **Silero VAD** for accurate voice activity detection
 - **Audio resampling** — works with any device sample rate (auto-resamples to 16kHz)
 - **Audio preprocessing** — noise gate, normalization, high-pass filter
 - **Admin panel** (`/admin`) — device selection, parameter tuning, VU meter, real-time log
+- **Persistent configuration** — settings saved to `config.json`, restored on restart
+- **Automatic source language detection** — optional model-based detection
 - **Internationalized UI** — frontend adapts to the selected language
 - **PWA support** — installable on mobile devices
 - **Dark/Light theme** with auto-detection
@@ -75,8 +77,12 @@ All parameters can be adjusted at runtime via the admin panel (`/admin`):
 | Max chunk duration | 12.0s | Force-trigger after this duration |
 | Context overlap | 0.5s | Audio overlap between segments |
 | Noise gate | Off | Silence audio below threshold |
+| Noise gate threshold | -40 dB | Threshold level for noise gate |
 | Normalization | Off | Equalize volume levels |
+| Normalization target | -3 dB | Target level for normalization |
 | High-pass filter | Off | Remove low-frequency rumble |
+| High-pass cutoff | 80 Hz | Cutoff frequency for high-pass filter |
+| Auto language detection | Off | Detect source language automatically |
 
 ## Supported Languages
 
@@ -84,7 +90,7 @@ All parameters can be adjusted at runtime via the admin panel (`/admin`):
 |------|----------|
 | `ces` | Czech (default) |
 | `eng` | English |
-| `rus` | Russian |
+| `spa` | Spanish |
 | `ukr` | Ukrainian |
 | `deu` | German |
 | `pol` | Polish |
@@ -106,22 +112,33 @@ Microphone → sounddevice (native SR) → Resample to 16kHz → Silero VAD
 ## Project Structure
 
 ```
-├── app.py                  # Main server (audio, translation, WebSocket, API)
-├── requirements.txt        # Python dependencies
-├── run_translation.bat     # Windows launch script
-├── run_translation.sh      # macOS/Linux launch script
+├── app.py                      # Entry point (initialize + start server)
+├── src/
+│   ├── config.py               # Configuration defaults, load/save, runtime_config
+│   ├── logging_handler.py      # Log buffer handler for admin panel
+│   ├── state.py                # Global state, locks, initialize()
+│   ├── server.py               # FastAPI app, routes, WebSocket, processing loop
+│   ├── audio/
+│   │   ├── capture.py          # Device detection, VAD, audio stream, resampling
+│   │   └── preprocess.py       # High-pass filter, noise gate, normalization
+│   └── translation/
+│       ├── engine.py           # Model loading, warmup, translate_audio
+│       └── session.py          # ClientSession, SessionManager
 ├── templates/
-│   ├── index.html          # Viewer page (subtitles)
-│   └── admin.html          # Admin panel
+│   ├── index.html              # Viewer page (subtitles)
+│   └── admin.html              # Admin panel
 ├── static/
-│   ├── app.js              # Viewer frontend (i18n, WebSocket, UI)
-│   ├── styles.css          # Viewer styles
-│   ├── admin.js            # Admin frontend
-│   ├── admin.css           # Admin styles
-│   ├── sw.js               # Service Worker (PWA)
-│   ├── manifest.json       # PWA manifest
-│   └── assets/             # Favicon, QR code
-└── DOKUMENTACE_PROJEKTU.md # Detailed documentation (Czech)
+│   ├── app.js                  # Viewer frontend (i18n, WebSocket, UI)
+│   ├── styles.css              # Viewer styles
+│   ├── admin.js                # Admin frontend (i18n cs/en)
+│   ├── admin.css               # Admin styles
+│   ├── sw.js                   # Service Worker (PWA)
+│   ├── manifest.json           # PWA manifest
+│   └── assets/                 # Favicon, QR code
+├── preview_server.py           # Standalone mock server for UI development
+├── requirements.txt            # Python dependencies
+├── run_translation.bat         # Windows launch script
+└── run_translation.sh          # macOS/Linux launch script
 ```
 
 ## Contributing
