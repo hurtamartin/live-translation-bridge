@@ -24,6 +24,8 @@ DEFAULT_CONFIG = {
 
 CONFIG_FILE = Path(__file__).parent.parent / "config.json"
 
+SUPPORTED_LANGUAGES = {"ces", "eng", "spa", "ukr", "deu", "pol"}
+
 def load_config() -> dict:
     """Load config from JSON file, falling back to defaults."""
     config = dict(DEFAULT_CONFIG)

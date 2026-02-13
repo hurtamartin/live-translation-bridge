@@ -143,6 +143,7 @@ const TRANSLATIONS = {
 const CONFIG = {
   RECONNECT_BASE: 1000,
   RECONNECT_MAX: 30000,
+  MAX_SUBTITLE_LENGTH: 500,
   DEFAULT_LANG: 'ces',
   DEFAULT_MAX_SUBTITLES: 10,
   DEFAULT_FONT_SIZE: 28,
@@ -303,19 +304,24 @@ function connect() {
   };
 
   state.ws.onmessage = function(event) {
-    // Backend sends JSON {"type":"subtitle","text":"..."} or plain text (fallback)
+    // Backend sends JSON {"type":"subtitle","text":"..."}
     var text = '';
     try {
       var data = JSON.parse(event.data);
-      if (data.type === 'subtitle' && data.text) {
+      if (data.type === 'subtitle' && typeof data.text === 'string') {
         text = data.text;
       }
     } catch (e) {
-      // Fallback: plain text from older backend
-      text = event.data;
+      console.warn('[WS] Invalid message format:', e.message);
+      return;
     }
-    if (text && text.trim()) {
-      addSubtitle(text.trim());
+    if (!text) return;
+    // Sanitize: limit length, strip RTL/LTR override characters
+    text = text.substring(0, CONFIG.MAX_SUBTITLE_LENGTH)
+               .replace(/[\u202A-\u202E\u200F\u200E\u061C\u2066-\u2069]/g, '')
+               .trim();
+    if (text) {
+      addSubtitle(text);
     }
   };
 

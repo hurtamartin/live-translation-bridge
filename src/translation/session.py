@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import threading
 import time
 import uuid
@@ -8,6 +9,8 @@ from dataclasses import dataclass, field
 from fastapi import WebSocket
 
 from src.config import runtime_config
+
+MAX_CLIENTS = int(os.environ.get("MAX_CLIENTS", "200"))
 
 
 @dataclass
@@ -24,7 +27,11 @@ class SessionManager:
         self._sessions: dict[str, ClientSession] = {}
         self._lock = threading.Lock()
 
-    async def connect(self, websocket: WebSocket) -> str:
+    async def connect(self, websocket: WebSocket) -> str | None:
+        """Accept a new WebSocket client. Returns session_id, or None if limit reached."""
+        with self._lock:
+            if len(self._sessions) >= MAX_CLIENTS:
+                return None
         await websocket.accept()
         session_id = str(uuid.uuid4())
         client_ip = ""

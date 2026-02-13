@@ -10,3 +10,4 @@ websockets
 jinja2
 protobuf
 sentencepiece
+python-dotenv

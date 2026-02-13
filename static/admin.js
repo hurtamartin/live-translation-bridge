@@ -71,6 +71,7 @@ var ADMIN_TRANSLATIONS = {
     configImported: 'Konfigurace importovana',
     importError: 'Chyba importu',
     invalidJson: 'Neplatny JSON soubor',
+    fileTooLarge: 'Soubor je prilis velky (max 100 KB)',
     deviceChanged: 'Audio zarizeni zmeneno',
     deviceLoadError: 'Chyba nacitani zarizeni',
     unknownError: 'Neznama chyba',
@@ -157,6 +158,7 @@ var ADMIN_TRANSLATIONS = {
     configImported: 'Configuration imported',
     importError: 'Import error',
     invalidJson: 'Invalid JSON file',
+    fileTooLarge: 'File too large (max 100 KB)',
     deviceChanged: 'Audio device changed',
     deviceLoadError: 'Error loading devices',
     unknownError: 'Unknown error',
@@ -210,6 +212,17 @@ var adminState = {
 };
 
 var MAX_LOG_ENTRIES = 200;
+
+function getAdminWsUrl(path) {
+  var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var base = protocol + '//' + window.location.host + path;
+  // Browser WebSocket API cannot send custom headers, so we pass the
+  // auth token as a query parameter. The token is injected by the server
+  // into admin.html via a <meta> tag when the page is rendered.
+  var meta = document.querySelector('meta[name="ws-token"]');
+  var token = meta ? meta.getAttribute('content') : '';
+  return token ? base + '?token=' + encodeURIComponent(token) : base;
+}
 
 /* ========== DOM ========== */
 
@@ -442,10 +455,7 @@ function handleStatusData(data) {
 }
 
 function connectStatusWs() {
-  var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  var url = protocol + '//' + window.location.host + '/api/status/ws';
-
-  adminState.statusWs = new WebSocket(url);
+  adminState.statusWs = new WebSocket(getAdminWsUrl('/api/status/ws'));
 
   adminState.statusWs.onmessage = function(event) {
     try {
@@ -616,6 +626,11 @@ function importConfig() {
 function handleImportFile(e) {
   var file = e.target.files[0];
   if (!file) return;
+  if (file.size > 102400) {
+    showToast(adminT('fileTooLarge'), 'error');
+    e.target.value = '';
+    return;
+  }
   var reader = new FileReader();
   reader.onload = function(ev) {
     try {
@@ -629,7 +644,12 @@ function handleImportFile(e) {
         .then(function(data) {
           if (data.ok) {
             syncConfigUI(data.config);
-            showToast(adminT('configImported') + ' (' + data.imported + ' ' + adminT('keys') + ')', 'success');
+            var msg = adminT('configImported') + ' (' + data.imported + ' ' + adminT('keys') + ')';
+            if (data.errors) {
+              msg += ', ' + Object.keys(data.errors).length + ' rejected';
+              console.warn('Config import rejected keys:', data.errors);
+            }
+            showToast(msg, data.errors ? 'warning' : 'success');
           } else {
             showToast(adminT('importError') + ': ' + (data.error || ''), 'error');
           }
@@ -834,13 +854,25 @@ function fetchSessions() {
     .then(function(r) { return r.json(); })
     .then(function(sessions) {
       if (sessions.length === 0) {
-        dom.sessionsBody.innerHTML = '<tr><td colspan="4" class="sessions-table__empty">' + adminT('noClients') + '</td></tr>';
+        dom.sessionsBody.innerHTML = '';
+        var emptyTr = document.createElement('tr');
+        var emptyTd = document.createElement('td');
+        emptyTd.colSpan = 4;
+        emptyTd.className = 'sessions-table__empty';
+        emptyTd.textContent = adminT('noClients');
+        emptyTr.appendChild(emptyTd);
+        dom.sessionsBody.appendChild(emptyTr);
         return;
       }
       dom.sessionsBody.innerHTML = '';
       sessions.forEach(function(s) {
         var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + s.id + '</td><td>' + s.lang + '</td><td>' + s.ip + '</td><td>' + formatUptime(s.connected_for) + '</td>';
+        var cells = [s.id, s.lang, s.ip, formatUptime(s.connected_for)];
+        cells.forEach(function(text) {
+          var td = document.createElement('td');
+          td.textContent = text;
+          tr.appendChild(td);
+        });
         dom.sessionsBody.appendChild(tr);
       });
     })
@@ -857,17 +889,29 @@ function fetchTranslations() {
     .then(function(r) { return r.json(); })
     .then(function(entries) {
       if (entries.length === 0) {
-        dom.translationHistory.innerHTML = '<div class="translation-history__empty">' + adminT('noTranslations') + '</div>';
+        dom.translationHistory.innerHTML = '';
+        var emptyDiv = document.createElement('div');
+        emptyDiv.className = 'translation-history__empty';
+        emptyDiv.textContent = adminT('noTranslations');
+        dom.translationHistory.appendChild(emptyDiv);
         return;
       }
       dom.translationHistory.innerHTML = '';
       entries.reverse().forEach(function(entry) {
         var el = document.createElement('div');
         el.className = 'translation-entry';
-        var langs = Object.keys(entry.translations).map(function(lang) {
-          return '<span class="translation-entry__lang">' + lang + '</span> ' + entry.translations[lang];
-        }).join('<br>');
-        el.innerHTML = '<span class="translation-entry__time">' + entry.time + '</span>' + langs;
+        var timeSpan = document.createElement('span');
+        timeSpan.className = 'translation-entry__time';
+        timeSpan.textContent = entry.time;
+        el.appendChild(timeSpan);
+        Object.keys(entry.translations).forEach(function(lang) {
+          var langSpan = document.createElement('span');
+          langSpan.className = 'translation-entry__lang';
+          langSpan.textContent = lang;
+          el.appendChild(langSpan);
+          el.appendChild(document.createTextNode(' ' + entry.translations[lang]));
+          el.appendChild(document.createElement('br'));
+        });
         dom.translationHistory.appendChild(el);
       });
     })
@@ -895,10 +939,7 @@ function addLogEntry(entry) {
 }
 
 function connectLogWs() {
-  var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  var url = protocol + '//' + window.location.host + '/api/logs';
-
-  adminState.logWs = new WebSocket(url);
+  adminState.logWs = new WebSocket(getAdminWsUrl('/api/logs'));
 
   adminState.logWs.onmessage = function(event) {
     try {

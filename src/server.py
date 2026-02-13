@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import os
 import queue
 import threading
 import time
@@ -10,13 +11,14 @@ import secrets
 import sounddevice as sd
 import torch
 from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from src.logging_handler import logger, log_handler
-from src.config import runtime_config, save_config, DEFAULT_CONFIG, CONFIG_RANGES
+from src.config import runtime_config, save_config, DEFAULT_CONFIG, CONFIG_RANGES, SUPPORTED_LANGUAGES
 from src.translation.engine import MODEL_NAME, translate_audio
 from src.audio.capture import (
     get_audio_devices, restart_audio_stream, compute_audio_level,
@@ -26,13 +28,28 @@ import src.state as state
 
 # --- WEB SERVER ---
 app = FastAPI()
+
+# --- CORS ---
+cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in cors_origins.split(",")],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # --- ADMIN AUTH ---
 security = HTTPBasic()
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "adminCB"
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
+
+if ADMIN_USERNAME == "admin" and ADMIN_PASSWORD == "admin":
+    logger.warning("Using default admin credentials — set ADMIN_USERNAME and ADMIN_PASSWORD env vars for production")
 
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
@@ -53,8 +70,18 @@ async def get(request: Request):
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request, _user: str = Depends(verify_admin)):
-    return templates.TemplateResponse("admin.html", {"request": request})
+async def admin_page(request: Request, credentials: HTTPBasicCredentials = Depends(security)):
+    # Verify credentials (reuse same logic as verify_admin)
+    if not (secrets.compare_digest(credentials.username, ADMIN_USERNAME) and
+            secrets.compare_digest(credentials.password, ADMIN_PASSWORD)):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    # Generate token for authenticated WebSocket connections
+    ws_token = base64.b64encode(f"{credentials.username}:{credentials.password}".encode()).decode()
+    return templates.TemplateResponse("admin.html", {"request": request, "ws_token": ws_token})
 
 
 # --- API ENDPOINTS ---
@@ -148,46 +175,57 @@ async def api_config_get(_user: str = Depends(verify_admin)):
     return JSONResponse(dict(runtime_config))
 
 
+def _validate_config_values(body: dict) -> tuple[dict, dict]:
+    """Validate config key/value pairs. Returns (validated, errors) dicts."""
+    validated = {}
+    errors = {}
+
+    for key, value in body.items():
+        if key not in DEFAULT_CONFIG:
+            errors[key] = f"Unknown config key: {key}"
+            continue
+
+        expected_type = type(DEFAULT_CONFIG[key])
+        if DEFAULT_CONFIG[key] is None:
+            if value is not None and not isinstance(value, int):
+                errors[key] = f"Expected int or null for {key}"
+                continue
+        elif expected_type == bool:
+            if not isinstance(value, bool):
+                errors[key] = f"Expected bool for {key}"
+                continue
+        elif expected_type == float:
+            if not isinstance(value, (int, float)):
+                errors[key] = f"Expected number for {key}"
+                continue
+            value = float(value)
+        elif expected_type == int:
+            if not isinstance(value, (int,)) or isinstance(value, bool):
+                errors[key] = f"Expected int for {key}"
+                continue
+        elif expected_type == str:
+            if not isinstance(value, str):
+                errors[key] = f"Expected string for {key}"
+                continue
+
+        if key in CONFIG_RANGES:
+            min_val, max_val = CONFIG_RANGES[key]
+            if value < min_val or value > max_val:
+                errors[key] = f"{key} must be between {min_val} and {max_val}"
+                continue
+
+        validated[key] = value
+
+    return validated, errors
+
+
 @app.post("/api/config")
 async def api_config_post(request: Request, _user: str = Depends(verify_admin)):
     try:
         body = await request.json()
-        errors = {}
+        validated, errors = _validate_config_values(body)
 
-        for key, value in body.items():
-            if key not in runtime_config:
-                errors[key] = f"Unknown config key: {key}"
-                continue
-
-            expected_type = type(DEFAULT_CONFIG[key])
-            if DEFAULT_CONFIG[key] is None:
-                if value is not None and not isinstance(value, int):
-                    errors[key] = f"Expected int or null for {key}"
-                    continue
-            elif expected_type == bool:
-                if not isinstance(value, bool):
-                    errors[key] = f"Expected bool for {key}"
-                    continue
-            elif expected_type == float:
-                if not isinstance(value, (int, float)):
-                    errors[key] = f"Expected number for {key}"
-                    continue
-                value = float(value)
-            elif expected_type == int:
-                if not isinstance(value, (int,)) or isinstance(value, bool):
-                    errors[key] = f"Expected int for {key}"
-                    continue
-            elif expected_type == str:
-                if not isinstance(value, str):
-                    errors[key] = f"Expected string for {key}"
-                    continue
-
-            if key in CONFIG_RANGES:
-                min_val, max_val = CONFIG_RANGES[key]
-                if value < min_val or value > max_val:
-                    errors[key] = f"{key} must be between {min_val} and {max_val}"
-                    continue
-
+        for key, value in validated.items():
             runtime_config[key] = value
 
         if errors:
@@ -210,14 +248,19 @@ async def api_config_export(_user: str = Depends(verify_admin)):
 async def api_config_import(request: Request, _user: str = Depends(verify_admin)):
     try:
         body = await request.json()
-        imported = 0
-        for key, value in body.items():
-            if key in DEFAULT_CONFIG:
-                runtime_config[key] = value
-                imported += 1
-        save_config()
-        logger.info(f"Config imported: {imported} keys")
-        return JSONResponse({"ok": True, "imported": imported, "config": dict(runtime_config)})
+        validated, errors = _validate_config_values(body)
+
+        for key, value in validated.items():
+            runtime_config[key] = value
+
+        if validated:
+            save_config()
+
+        logger.info(f"Config imported: {len(validated)} keys" + (f", {len(errors)} rejected" if errors else ""))
+        result = {"ok": True, "imported": len(validated), "config": dict(runtime_config)}
+        if errors:
+            result["errors"] = errors
+        return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -275,10 +318,27 @@ async def api_audio_history(_user: str = Depends(verify_admin)):
 # --- WebSocket endpoints ---
 
 def _verify_ws_auth(websocket: WebSocket) -> bool:
+    """Verify admin credentials for WebSocket connections.
+
+    Checks Authorization header first (works for non-browser clients),
+    then falls back to ?token= query parameter (Base64-encoded user:pass)
+    because browser WebSocket API does not support custom headers.
+    """
+    # Try Authorization header first
     auth_header = websocket.headers.get("authorization", "")
     if auth_header.startswith("Basic "):
         try:
             decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            username, password = decoded.split(":", 1)
+            if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
+                return True
+        except Exception:
+            pass
+    # Fallback: ?token=base64(user:pass) for browser WebSocket
+    token = websocket.query_params.get("token", "")
+    if token:
+        try:
+            decoded = base64.b64decode(token).decode("utf-8")
             username, password = decoded.split(":", 1)
             if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
                 return True
@@ -354,15 +414,29 @@ async def api_logs_ws(websocket: WebSocket):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     session_id = await state.manager.connect(websocket)
+    if session_id is None:
+        await websocket.close(code=1013, reason="Too many clients")
+        logger.warning("Client rejected: connection limit reached")
+        return
     logger.info(f"Client connected: {session_id[:8]}")
     try:
         while True:
             msg = await websocket.receive_text()
-            data = json.loads(msg)
+            try:
+                data = json.loads(msg)
+            except (json.JSONDecodeError, ValueError):
+                logger.warning(f"Session {session_id[:8]} sent invalid JSON")
+                continue
             if data.get("type") == "set_lang" and "lang" in data:
-                state.manager.set_language(session_id, data["lang"])
-                logger.info(f"Session {session_id[:8]} language -> {data['lang']}")
+                lang = data["lang"]
+                if not isinstance(lang, str) or lang not in SUPPORTED_LANGUAGES:
+                    logger.warning(f"Session {session_id[:8]} invalid language: {str(lang)[:20]}")
+                    continue
+                state.manager.set_language(session_id, lang)
+                logger.info(f"Session {session_id[:8]} language -> {lang}")
     except WebSocketDisconnect:
+        pass
+    finally:
         state.manager.disconnect(session_id)
         logger.info(f"Client disconnected: {session_id[:8]}")
 

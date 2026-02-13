@@ -67,6 +67,24 @@ The server starts on `http://0.0.0.0:8888`.
 - **Viewer page**: `http://localhost:8888` — select language, view live subtitles
 - **Admin panel**: `http://localhost:8888/admin` — configure audio device, tuning parameters, monitor status
 
+### Environment Variables
+
+Create a `config.env` file in the project root (or set system environment variables):
+
+```env
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADMIN_USERNAME` | `admin` | Admin panel login username |
+| `ADMIN_PASSWORD` | `admin` | Admin panel login password |
+| `CORS_ORIGINS` | *(empty — CORS disabled)* | Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`) |
+| `MAX_CLIENTS` | `200` | Maximum concurrent WebSocket viewer connections |
+
+> **Note:** A warning is logged at startup if default credentials are used.
+
 ### Uninstall
 
 To remove the virtual environment, downloaded AI models, and generated config:
