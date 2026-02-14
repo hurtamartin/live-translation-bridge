@@ -410,35 +410,38 @@ function setDot(el, status) {
 }
 
 function handleStatusData(data) {
+  if (!data) return;
   var c = data.components || {};
 
   if (c.model) {
-    setDot(dom.dotModel, c.model.status);
-    var modelDetail = c.model.device.toUpperCase();
+    setDot(dom.dotModel, c.model.status || 'stopped');
+    var modelDevice = (c.model.device || 'unknown').toUpperCase();
+    var modelDetail = modelDevice;
     if (c.model.gpu_name) modelDetail += ' (' + c.model.gpu_name + ')';
     dom.detailModel.textContent = modelDetail;
   }
   if (c.vad) {
-    setDot(dom.dotVad, c.vad.status);
-    dom.detailVad.textContent = c.vad.type;
+    setDot(dom.dotVad, c.vad.status || 'stopped');
+    dom.detailVad.textContent = c.vad.type || 'unknown';
   }
   if (c.audio_stream) {
-    setDot(dom.dotAudio, c.audio_stream.status);
+    setDot(dom.dotAudio, c.audio_stream.status || 'stopped');
     if (c.audio_stream.status === 'running') {
-      dom.detailAudio.textContent = c.audio_stream.device_name + ' ch' + c.audio_stream.channel;
+      dom.detailAudio.textContent = (c.audio_stream.device_name || '?') + ' ch' + (c.audio_stream.channel || 0);
     } else {
       dom.detailAudio.textContent = adminT('stopped');
     }
   }
   if (c.inference_executor) {
-    setDot(dom.dotInference, c.inference_executor.status);
-    dom.detailInference.textContent = adminT('pending') + ': ' + c.inference_executor.pending_tasks;
+    setDot(dom.dotInference, c.inference_executor.status || 'stopped');
+    dom.detailInference.textContent = adminT('pending') + ': ' + (c.inference_executor.pending_tasks || 0);
   }
 
-  dom.infoClients.textContent = adminT('clients') + ': ' + data.clients;
-  dom.infoLanguages.textContent = adminT('languages') + ': ' + (data.active_languages.length > 0 ? data.active_languages.join(', ') : '--');
-  dom.infoDevice.textContent = adminT('hardware') + ': ' + data.device.toUpperCase();
-  dom.infoUptime.textContent = adminT('uptime') + ': ' + formatUptime(data.uptime);
+  dom.infoClients.textContent = adminT('clients') + ': ' + (data.clients || 0);
+  var langs = data.active_languages || [];
+  dom.infoLanguages.textContent = adminT('languages') + ': ' + (langs.length > 0 ? langs.join(', ') : '--');
+  dom.infoDevice.textContent = adminT('hardware') + ': ' + ((data.device || 'unknown').toUpperCase());
+  dom.infoUptime.textContent = adminT('uptime') + ': ' + formatUptime(data.uptime || 0);
 
   // VU Meter with peak hold
   if (data.audio_level_db !== undefined) {
@@ -454,8 +457,14 @@ function handleStatusData(data) {
   }
 }
 
+var statusWsBackoff = 3000;
+
 function connectStatusWs() {
   adminState.statusWs = new WebSocket(getAdminWsUrl('/api/status/ws'));
+
+  adminState.statusWs.onopen = function() {
+    statusWsBackoff = 3000; // reset on success
+  };
 
   adminState.statusWs.onmessage = function(event) {
     try {
@@ -468,7 +477,8 @@ function connectStatusWs() {
   };
 
   adminState.statusWs.onclose = function() {
-    setTimeout(connectStatusWs, 3000);
+    setTimeout(connectStatusWs, statusWsBackoff);
+    statusWsBackoff = Math.min(statusWsBackoff * 2, 30000);
   };
 
   adminState.statusWs.onerror = function(err) {
@@ -938,8 +948,14 @@ function addLogEntry(entry) {
   }
 }
 
+var logWsBackoff = 3000;
+
 function connectLogWs() {
   adminState.logWs = new WebSocket(getAdminWsUrl('/api/logs'));
+
+  adminState.logWs.onopen = function() {
+    logWsBackoff = 3000; // reset on success
+  };
 
   adminState.logWs.onmessage = function(event) {
     try {
@@ -956,7 +972,8 @@ function connectLogWs() {
   };
 
   adminState.logWs.onclose = function() {
-    setTimeout(connectLogWs, 3000);
+    setTimeout(connectLogWs, logWsBackoff);
+    logWsBackoff = Math.min(logWsBackoff * 2, 30000);
   };
 
   adminState.logWs.onerror = function(err) {

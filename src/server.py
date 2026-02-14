@@ -446,7 +446,10 @@ async def websocket_endpoint(websocket: WebSocket):
             except (json.JSONDecodeError, ValueError):
                 logger.warning(f"Session {session_id[:8]} sent invalid JSON")
                 continue
-            if data.get("type") == "set_lang" and "lang" in data:
+            msg_type = data.get("type")
+            if msg_type == "ping":
+                await websocket.send_text('{"type":"pong"}')
+            elif msg_type == "set_lang" and "lang" in data:
                 lang = data["lang"]
                 if not isinstance(lang, str) or lang not in SUPPORTED_LANGUAGES:
                     logger.warning(f"Session {session_id[:8]} invalid language: {str(lang)[:20]}")

@@ -147,6 +147,8 @@ const CONFIG = {
   DEFAULT_LANG: 'ces',
   DEFAULT_MAX_SUBTITLES: 10,
   DEFAULT_FONT_SIZE: 28,
+  PING_INTERVAL: 30000,
+  PING_TIMEOUT: 5000,
 };
 
 /* ========== State ========== */
@@ -166,6 +168,8 @@ const state = {
   previousFocus: null,
   autoHideTimer: null,
   switchingLanguage: false,
+  pingInterval: null,
+  pingTimeout: null,
 };
 
 /* ========== DOM References ========== */
@@ -301,13 +305,30 @@ function connect() {
 
     // Send current language preference to backend
     state.ws.send(JSON.stringify({ type: 'set_lang', lang: state.language }));
+
+    // Start heartbeat ping
+    clearInterval(state.pingInterval);
+    state.pingInterval = setInterval(function() {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: 'ping' }));
+        // If no pong within timeout, force reconnect
+        state.pingTimeout = setTimeout(function() {
+          console.warn('[WS] Ping timeout — reconnecting');
+          if (state.ws) state.ws.close();
+        }, CONFIG.PING_TIMEOUT);
+      }
+    }, CONFIG.PING_INTERVAL);
   };
 
   state.ws.onmessage = function(event) {
-    // Backend sends JSON {"type":"subtitle","text":"..."}
+    // Backend sends JSON {"type":"subtitle","text":"..."} or {"type":"pong"}
     var text = '';
     try {
       var data = JSON.parse(event.data);
+      if (data.type === 'pong') {
+        clearTimeout(state.pingTimeout);
+        return;
+      }
       if (data.type === 'subtitle' && typeof data.text === 'string') {
         text = data.text;
       }
@@ -328,6 +349,8 @@ function connect() {
   state.ws.onclose = function() {
     console.log('[WS] Disconnected');
     state.connected = false;
+    clearInterval(state.pingInterval);
+    clearTimeout(state.pingTimeout);
     setStatus('error');
     releaseWakeLock();
     scheduleReconnect();
@@ -342,7 +365,10 @@ function connect() {
 function scheduleReconnect() {
   if (state.reconnectTimer) return;
 
-  var delay = state.reconnectDelay;
+  // Add random jitter ±25% to prevent thundering herd
+  var baseDelay = state.reconnectDelay;
+  var jitter = baseDelay * (0.5 * Math.random() - 0.25);
+  var delay = Math.max(baseDelay + jitter, 500);
   var remaining = Math.round(delay / 1000);
   setStatus('error', t('disconnectedTimer').replace('{0}', remaining));
 
