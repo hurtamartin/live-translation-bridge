@@ -701,3 +701,14 @@ body {
     max-width: none;
   }
 }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .confirm-overlay,
+  .audio-meter__bar,
+  .audio-meter__peak,
+  .save-status {
+    transition: none;
+  }
+}

@@ -38,6 +38,8 @@ const TRANSLATIONS = {
     qrInstruction: 'P\u0159ipojte se na Wi-Fi a naskenujte k\u00f3d',
     pageTitle: 'Live P\u0159eklad',
     offline: 'Offline re\u017eim',
+    updateAvailable: 'Nov\u00e1 verze k dispozici',
+    updateReload: 'Aktualizovat',
   },
   eng: {
     waitingForTranslation: 'Waiting for translation...',
@@ -59,6 +61,8 @@ const TRANSLATIONS = {
     qrInstruction: 'Connect to Wi-Fi and scan the code',
     pageTitle: 'Live Translation',
     offline: 'Offline mode',
+    updateAvailable: 'New version available',
+    updateReload: 'Reload',
   },
   spa: {
     waitingForTranslation: 'Esperando traducción...',
@@ -80,6 +84,8 @@ const TRANSLATIONS = {
     qrInstruction: 'Conéctese al Wi-Fi y escanee el código',
     pageTitle: 'Traducción en vivo',
     offline: 'Sin conexión',
+    updateAvailable: 'Nueva versión disponible',
+    updateReload: 'Recargar',
   },
   ukr: {
     waitingForTranslation: '\u041E\u0447\u0456\u043A\u0443\u0432\u0430\u043D\u043D\u044F \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0443...',
@@ -101,6 +107,8 @@ const TRANSLATIONS = {
     qrInstruction: '\u041F\u0456\u0434\u043A\u043B\u044E\u0447\u0456\u0442\u044C\u0441\u044F \u0434\u043E Wi-Fi \u0442\u0430 \u0432\u0456\u0434\u0441\u043A\u0430\u043D\u0443\u0439\u0442\u0435 \u043A\u043E\u0434',
     pageTitle: 'Live \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434',
     offline: '\u041E\u0444\u043B\u0430\u0439\u043D',
+    updateAvailable: '\u0414\u043E\u0441\u0442\u0443\u043F\u043D\u0430 \u043D\u043E\u0432\u0430 \u0432\u0435\u0440\u0441\u0456\u044F',
+    updateReload: '\u041E\u043D\u043E\u0432\u0438\u0442\u0438',
   },
   deu: {
     waitingForTranslation: 'Warte auf \u00dcbersetzung...',
@@ -122,6 +130,8 @@ const TRANSLATIONS = {
     qrInstruction: 'Verbinden Sie sich mit dem WLAN und scannen Sie den Code',
     pageTitle: 'Live \u00dcbersetzung',
     offline: 'Offline-Modus',
+    updateAvailable: 'Neue Version verf\u00fcgbar',
+    updateReload: 'Aktualisieren',
   },
   pol: {
     waitingForTranslation: 'Oczekiwanie na t\u0142umaczenie...',
@@ -143,6 +153,8 @@ const TRANSLATIONS = {
     qrInstruction: 'Po\u0142\u0105cz si\u0119 z Wi-Fi i zeskanuj kod',
     pageTitle: 'Live T\u0142umaczenie',
     offline: 'Tryb offline',
+    updateAvailable: 'Dost\u0119pna nowa wersja',
+    updateReload: 'Od\u015bwie\u017c',
   },
 };
 
@@ -787,8 +799,27 @@ function setupAutoHide() {
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js').then(function() {
+    navigator.serviceWorker.register('/static/sw.js').then(function(registration) {
       console.log('[SW] Registered');
+      // Listen for updates
+      registration.addEventListener('updatefound', function() {
+        var newWorker = registration.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', function() {
+          if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+            // New version available — show update banner
+            var banner = document.createElement('div');
+            banner.className = 'update-banner';
+            banner.innerHTML = '<span>' + t('updateAvailable') + '</span>';
+            var btn = document.createElement('button');
+            btn.className = 'update-banner__btn';
+            btn.textContent = t('updateReload');
+            btn.addEventListener('click', function() { window.location.reload(); });
+            banner.appendChild(btn);
+            document.body.appendChild(banner);
+          }
+        });
+      });
     }).catch(function(err) {
       console.error('[SW] Registration failed:', err);
     });
