@@ -327,6 +327,33 @@ body {
   display: block;
 }
 
+/* Log filters */
+.log-filters {
+  display: flex;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.log-filter {
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.log-filter input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.log-entry--filtered {
+  display: none;
+}
+
 /* Log container */
 .admin-card--log {
   display: flex;

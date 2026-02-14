@@ -209,6 +209,7 @@ var adminState = {
   saveDebounceTimer: null,
   ppSaveTimer: null,
   lang: localStorage.getItem('adminLang') || 'cs',
+  logFilterLevels: JSON.parse(localStorage.getItem('logFilterLevels') || '{"DEBUG":true,"INFO":true,"WARNING":true,"ERROR":true}'),
 };
 
 var MAX_LOG_ENTRIES = 200;
@@ -296,6 +297,7 @@ var dom = {
   logContainer: document.getElementById('logContainer'),
   logAutoScroll: document.getElementById('logAutoScroll'),
   clearLog: document.getElementById('clearLog'),
+  logFilters: document.getElementById('logFilters'),
   // Confirm
   confirmOverlay: document.getElementById('confirmOverlay'),
   confirmText: document.getElementById('confirmText'),
@@ -779,10 +781,20 @@ function applyDeviceSelection() {
 
 /* ========== Audio History Graph ========== */
 
+var _lastAudioHistoryHash = '';
+
 function fetchAudioHistory() {
+  // Skip if tab is hidden
+  if (document.hidden) return;
+
   fetch('/api/audio-history')
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      // Simple change detection: compare length + last entry
+      var hash = data.length + '_' + (data.length > 0 ? data[data.length - 1].db : '');
+      if (hash === _lastAudioHistoryHash) return;
+      _lastAudioHistoryHash = hash;
+
       adminState.audioHistoryData = data;
       drawAudioHistory();
     })
@@ -942,12 +954,38 @@ function fetchTranslations() {
 
 /* ========== Log WebSocket ========== */
 
-function addLogEntry(entry) {
-  var el = document.createElement('div');
-  el.className = 'log-entry log-entry--' + entry.level;
-  el.textContent = '[' + entry.time + '] ' + entry.level + ' ' + entry.message;
-  dom.logContainer.appendChild(el);
+var _logBatchQueue = [];
+var _logBatchRaf = null;
 
+function addLogEntry(entry) {
+  _logBatchQueue.push(entry);
+  if (!_logBatchRaf) {
+    _logBatchRaf = requestAnimationFrame(_flushLogBatch);
+  }
+}
+
+function _flushLogBatch() {
+  _logBatchRaf = null;
+  var batch = _logBatchQueue;
+  _logBatchQueue = [];
+  if (batch.length === 0) return;
+
+  var fragment = document.createDocumentFragment();
+  for (var i = 0; i < batch.length; i++) {
+    var entry = batch[i];
+    var el = document.createElement('div');
+    el.className = 'log-entry log-entry--' + entry.level;
+    el.setAttribute('data-level', entry.level);
+    el.textContent = '[' + entry.time + '] ' + entry.level + ' ' + entry.message;
+    // Apply filter
+    if (!adminState.logFilterLevels[entry.level]) {
+      el.classList.add('log-entry--filtered');
+    }
+    fragment.appendChild(el);
+  }
+  dom.logContainer.appendChild(fragment);
+
+  // Trim excess in one pass
   while (dom.logContainer.children.length > MAX_LOG_ENTRIES) {
     dom.logContainer.removeChild(dom.logContainer.firstChild);
   }
@@ -1078,6 +1116,27 @@ function initEvents() {
   dom.clearLog.addEventListener('click', function() {
     dom.logContainer.innerHTML = '';
   });
+
+  // Log level filters
+  if (dom.logFilters) {
+    var filterCheckboxes = dom.logFilters.querySelectorAll('input[type="checkbox"]');
+    // Init checkbox state from saved preferences
+    filterCheckboxes.forEach(function(cb) {
+      cb.checked = adminState.logFilterLevels[cb.value] !== false;
+      cb.addEventListener('change', function() {
+        adminState.logFilterLevels[cb.value] = cb.checked;
+        localStorage.setItem('logFilterLevels', JSON.stringify(adminState.logFilterLevels));
+        // Apply filter to existing entries
+        var entries = dom.logContainer.querySelectorAll('.log-entry');
+        entries.forEach(function(el) {
+          var level = el.getAttribute('data-level');
+          if (level === cb.value) {
+            el.classList.toggle('log-entry--filtered', !cb.checked);
+          }
+        });
+      });
+    });
+  }
 
   // Confirm dialog
   dom.confirmOk.addEventListener('click', function() {
