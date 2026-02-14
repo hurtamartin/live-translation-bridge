@@ -16,7 +16,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -497,6 +497,21 @@ async def health_check():
     })
 
 # --- Sessions, metrics, translation history ---
+
+@app.get("/api/qr.svg")
+async def qr_code_svg(request: Request):
+    """Generate QR code SVG dynamically from the request URL."""
+    import qrcode
+    import qrcode.image.svg
+    import io
+
+    base_url = str(request.base_url).rstrip("/")
+    img = qrcode.make(base_url, image_factory=qrcode.image.svg.SvgPathImage)
+    buf = io.BytesIO()
+    img.save(buf)
+    return Response(content=buf.getvalue(), media_type="image/svg+xml",
+                    headers={"Cache-Control": "no-cache"})
+
 
 @app.get("/api/sessions")
 async def api_sessions(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):

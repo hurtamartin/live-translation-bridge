@@ -77,6 +77,6 @@ echo "Installing dependencies..."
 
 # 5. Run Application
 echo "Starting Translation Server..."
-echo "Open http://<YOUR_IP>:8888 on mobile devices."
+echo "Open http://<YOUR_IP> on mobile devices (port configured in config.env)."
 cd "$BASE_DIR" || exit
 "$PYTHON_EXEC" "app.py"
