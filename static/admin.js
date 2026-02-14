@@ -542,6 +542,15 @@ function loadConfig() {
     });
 }
 
+/* ========== Debounce helper ========== */
+
+var _debounceTimers = {};
+
+function debounce(key, fn, delay) {
+  clearTimeout(_debounceTimers[key]);
+  _debounceTimers[key] = setTimeout(fn, delay || 500);
+}
+
 /* ========== Auto-save: Translation Parameters ========== */
 
 function autoSaveConfig() {
@@ -1024,35 +1033,43 @@ function initEvents() {
   dom.importConfig.addEventListener('click', importConfig);
   dom.importConfigFile.addEventListener('change', handleImportFile);
 
-  // Preprocessing — auto-save
+  // Preprocessing — auto-save (debounced)
   dom.ppNoiseGate.addEventListener('change', function() {
     togglePreprocessSettings(dom.ppNoiseGate, dom.ppNoiseGateSettings);
-    autoSavePreprocess();
+    debounce('preprocess', autoSavePreprocess);
   });
   dom.ppNormalize.addEventListener('change', function() {
     togglePreprocessSettings(dom.ppNormalize, dom.ppNormalizeSettings);
-    autoSavePreprocess();
+    debounce('preprocess', autoSavePreprocess);
   });
   dom.ppHighpass.addEventListener('change', function() {
     togglePreprocessSettings(dom.ppHighpass, dom.ppHighpassSettings);
-    autoSavePreprocess();
+    debounce('preprocess', autoSavePreprocess);
   });
-  dom.ppAutoLang.addEventListener('change', autoSavePreprocess);
+  dom.ppAutoLang.addEventListener('change', function() {
+    debounce('preprocess', autoSavePreprocess);
+  });
 
   dom.ppNoiseGateThreshold.addEventListener('input', function() {
     dom.ppNoiseGateThresholdVal.textContent = parseInt(dom.ppNoiseGateThreshold.value) + ' dB';
   });
-  dom.ppNoiseGateThreshold.addEventListener('change', autoSavePreprocess);
+  dom.ppNoiseGateThreshold.addEventListener('change', function() {
+    debounce('preprocess', autoSavePreprocess);
+  });
 
   dom.ppNormalizeTarget.addEventListener('input', function() {
     dom.ppNormalizeTargetVal.textContent = parseInt(dom.ppNormalizeTarget.value) + ' dB';
   });
-  dom.ppNormalizeTarget.addEventListener('change', autoSavePreprocess);
+  dom.ppNormalizeTarget.addEventListener('change', function() {
+    debounce('preprocess', autoSavePreprocess);
+  });
 
   dom.ppHighpassCutoff.addEventListener('input', function() {
     dom.ppHighpassCutoffVal.textContent = parseInt(dom.ppHighpassCutoff.value) + ' Hz';
   });
-  dom.ppHighpassCutoff.addEventListener('change', autoSavePreprocess);
+  dom.ppHighpassCutoff.addEventListener('change', function() {
+    debounce('preprocess', autoSavePreprocess);
+  });
 
   // Log
   dom.logAutoScroll.addEventListener('change', function() {

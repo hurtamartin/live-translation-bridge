@@ -37,6 +37,7 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live P\u0159eklad',
     qrInstruction: 'P\u0159ipojte se na Wi-Fi a naskenujte k\u00f3d',
     pageTitle: 'Live P\u0159eklad',
+    offline: 'Offline re\u017eim',
   },
   eng: {
     waitingForTranslation: 'Waiting for translation...',
@@ -57,6 +58,7 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live Translation',
     qrInstruction: 'Connect to Wi-Fi and scan the code',
     pageTitle: 'Live Translation',
+    offline: 'Offline mode',
   },
   spa: {
     waitingForTranslation: 'Esperando traducción...',
@@ -77,6 +79,7 @@ const TRANSLATIONS = {
     qrPageTitle: 'Traducción en vivo',
     qrInstruction: 'Conéctese al Wi-Fi y escanee el código',
     pageTitle: 'Traducción en vivo',
+    offline: 'Sin conexión',
   },
   ukr: {
     waitingForTranslation: '\u041E\u0447\u0456\u043A\u0443\u0432\u0430\u043D\u043D\u044F \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0443...',
@@ -97,6 +100,7 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434',
     qrInstruction: '\u041F\u0456\u0434\u043A\u043B\u044E\u0447\u0456\u0442\u044C\u0441\u044F \u0434\u043E Wi-Fi \u0442\u0430 \u0432\u0456\u0434\u0441\u043A\u0430\u043D\u0443\u0439\u0442\u0435 \u043A\u043E\u0434',
     pageTitle: 'Live \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434',
+    offline: '\u041E\u0444\u043B\u0430\u0439\u043D',
   },
   deu: {
     waitingForTranslation: 'Warte auf \u00dcbersetzung...',
@@ -117,6 +121,7 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live \u00dcbersetzung',
     qrInstruction: 'Verbinden Sie sich mit dem WLAN und scannen Sie den Code',
     pageTitle: 'Live \u00dcbersetzung',
+    offline: 'Offline-Modus',
   },
   pol: {
     waitingForTranslation: 'Oczekiwanie na t\u0142umaczenie...',
@@ -137,6 +142,7 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live T\u0142umaczenie',
     qrInstruction: 'Po\u0142\u0105cz si\u0119 z Wi-Fi i zeskanuj kod',
     pageTitle: 'Live T\u0142umaczenie',
+    offline: 'Tryb offline',
   },
 };
 
@@ -168,6 +174,7 @@ const state = {
   previousFocus: null,
   autoHideTimer: null,
   switchingLanguage: false,
+  switchingTimeout: null,
   pingInterval: null,
   pingTimeout: null,
 };
@@ -419,6 +426,25 @@ function changeLanguage(langCode) {
     }
   }
 
+  // Disable language buttons during switch
+  var langButtons = document.querySelectorAll('.lang-option');
+  langButtons.forEach(function(b) { b.disabled = true; });
+  dom.langFab.disabled = true;
+
+  // Timeout: reset switching state after 10s if no subtitle arrives
+  clearTimeout(state.switchingTimeout);
+  state.switchingTimeout = setTimeout(function() {
+    if (state.switchingLanguage) {
+      state.switchingLanguage = false;
+      langButtons.forEach(function(b) { b.disabled = false; });
+      dom.langFab.disabled = false;
+      if (dom.emptyState) {
+        var txt = dom.emptyState.querySelector('.empty__text');
+        if (txt) txt.textContent = t('waitingForTranslation');
+      }
+    }
+  }, 10000);
+
   // Send language change to backend
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify({ type: 'set_lang', lang: langCode }));
@@ -432,7 +458,13 @@ function changeLanguage(langCode) {
 
 function addSubtitle(text) {
   // Hide empty state and reset switching flag
-  state.switchingLanguage = false;
+  if (state.switchingLanguage) {
+    state.switchingLanguage = false;
+    clearTimeout(state.switchingTimeout);
+    // Re-enable language buttons
+    document.querySelectorAll('.lang-option').forEach(function(b) { b.disabled = false; });
+    dom.langFab.disabled = false;
+  }
   if (dom.emptyState) {
     dom.emptyState.style.display = 'none';
   }
@@ -611,9 +643,15 @@ function initEventListeners() {
 
   dom.langOptions.addEventListener('click', function(e) {
     var btn = e.target.closest('.lang-option');
-    if (btn && btn.dataset.lang) {
+    if (btn && btn.dataset.lang && !btn.disabled) {
       changeLanguage(btn.dataset.lang);
       closeModal(dom.langModal);
+      // Debounce: disable all lang buttons for 500ms
+      var buttons = document.querySelectorAll('.lang-option');
+      buttons.forEach(function(b) { b.disabled = true; });
+      setTimeout(function() {
+        buttons.forEach(function(b) { b.disabled = false; });
+      }, 500);
     }
   });
 
@@ -757,6 +795,30 @@ function registerServiceWorker() {
   }
 }
 
+/* ========== Offline Detection ========== */
+
+function setupOfflineDetection() {
+  // Create offline banner (inserted at top of body)
+  var banner = document.createElement('div');
+  banner.id = 'offlineBanner';
+  banner.className = 'offline-banner';
+  banner.textContent = t('offline');
+  banner.style.display = 'none';
+  document.body.appendChild(banner);
+
+  window.addEventListener('offline', function() {
+    banner.textContent = t('offline');
+    banner.style.display = '';
+  });
+  window.addEventListener('online', function() {
+    banner.style.display = 'none';
+  });
+  // Show immediately if already offline
+  if (!navigator.onLine) {
+    banner.style.display = '';
+  }
+}
+
 /* ========== Init ========== */
 
 function init() {
@@ -766,6 +828,7 @@ function init() {
   updateUILanguage();
   initEventListeners();
   setupAutoHide();
+  setupOfflineDetection();
   registerServiceWorker();
   connect();
 }

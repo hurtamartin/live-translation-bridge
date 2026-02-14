@@ -598,6 +598,21 @@ body {
   visibility: hidden;
 }
 
+/* === Offline banner === */
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 300;
+  padding: var(--space-xs) var(--space-md);
+  background: #dc2626;
+  color: white;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* Prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
