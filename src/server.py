@@ -19,6 +19,34 @@ from fastapi.templating import Jinja2Templates
 
 from src.logging_handler import logger, log_handler
 from src.config import runtime_config, save_config, DEFAULT_CONFIG, CONFIG_RANGES, SUPPORTED_LANGUAGES
+
+# --- Simple in-memory rate limiter ---
+_rate_limit_store: dict[str, list[float]] = {}
+_rate_limit_lock = threading.Lock()
+RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "10"))  # requests per window
+RATE_LIMIT_WINDOW = 1.0  # seconds
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Return True if request is allowed, False if rate-limited."""
+    now = time.time()
+    with _rate_limit_lock:
+        timestamps = _rate_limit_store.get(client_ip, [])
+        # Remove expired entries
+        timestamps = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
+        if len(timestamps) >= RATE_LIMIT_MAX:
+            _rate_limit_store[client_ip] = timestamps
+            return False
+        timestamps.append(now)
+        _rate_limit_store[client_ip] = timestamps
+        return True
+
+
+def rate_limit(request: Request):
+    """FastAPI dependency for rate limiting admin API endpoints."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests")
 from src.translation.engine import MODEL_NAME, translate_audio
 from src.audio.capture import (
     get_audio_devices, restart_audio_stream, compute_audio_level,
@@ -87,7 +115,7 @@ async def admin_page(request: Request, credentials: HTTPBasicCredentials = Depen
 # --- API ENDPOINTS ---
 
 @app.get("/api/status")
-async def api_status(_user: str = Depends(verify_admin)):
+async def api_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state.audio_stream_lock:
         if state.audio_stream is not None and state.audio_stream.active:
             dev_idx = runtime_config["audio_device_index"]
@@ -130,7 +158,7 @@ async def api_status(_user: str = Depends(verify_admin)):
 
 
 @app.get("/api/devices")
-async def api_devices(_user: str = Depends(verify_admin)):
+async def api_devices(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
         devices = get_audio_devices()
         return JSONResponse({
@@ -144,7 +172,7 @@ async def api_devices(_user: str = Depends(verify_admin)):
 
 
 @app.post("/api/devices/select")
-async def api_devices_select(request: Request, _user: str = Depends(verify_admin)):
+async def api_devices_select(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
         body = await request.json()
         device_index = body.get("device_index")
@@ -171,7 +199,7 @@ async def api_devices_select(request: Request, _user: str = Depends(verify_admin
 
 
 @app.get("/api/config")
-async def api_config_get(_user: str = Depends(verify_admin)):
+async def api_config_get(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     return JSONResponse(dict(runtime_config))
 
 
@@ -220,7 +248,7 @@ def _validate_config_values(body: dict) -> tuple[dict, dict]:
 
 
 @app.post("/api/config")
-async def api_config_post(request: Request, _user: str = Depends(verify_admin)):
+async def api_config_post(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
         body = await request.json()
         validated, errors = _validate_config_values(body)
@@ -240,12 +268,12 @@ async def api_config_post(request: Request, _user: str = Depends(verify_admin)):
 
 
 @app.get("/api/config/export")
-async def api_config_export(_user: str = Depends(verify_admin)):
+async def api_config_export(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     return JSONResponse(dict(runtime_config))
 
 
 @app.post("/api/config/import")
-async def api_config_import(request: Request, _user: str = Depends(verify_admin)):
+async def api_config_import(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
         body = await request.json()
         validated, errors = _validate_config_values(body)
@@ -298,12 +326,12 @@ async def health_check():
 
 
 @app.get("/api/sessions")
-async def api_sessions(_user: str = Depends(verify_admin)):
+async def api_sessions(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     return JSONResponse(state.manager.get_sessions_info())
 
 
 @app.get("/api/metrics")
-async def api_metrics(_user: str = Depends(verify_admin)):
+async def api_metrics(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state._perf_lock:
         enc = list(state._perf_metrics["encoder_ms"])
         dec = list(state._perf_metrics["decoder_ms"])
@@ -323,13 +351,13 @@ async def api_metrics(_user: str = Depends(verify_admin)):
 
 
 @app.get("/api/translations")
-async def api_translations(_user: str = Depends(verify_admin)):
+async def api_translations(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state._translation_history_lock:
         return JSONResponse(list(state._translation_history))
 
 
 @app.get("/api/audio-history")
-async def api_audio_history(_user: str = Depends(verify_admin)):
+async def api_audio_history(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state._audio_level_lock:
         return JSONResponse(list(state._audio_history))
 
@@ -496,6 +524,11 @@ def processing_loop(loop):
     last_future = None
     last_future_time = 0
 
+    _level_update_interval = 0.1  # update audio level at most 10x/s
+    _last_level_update = 0.0
+    _pending_level = -60.0
+    _pending_peak = -60.0
+
     while not state.stop_event.is_set():
         try:
             chunk = state.audio_queue.get(timeout=0.1)
@@ -507,10 +540,21 @@ def processing_loop(loop):
             chunk_np = resample_audio(chunk_np, current_resampler)
 
             level = compute_audio_level(chunk_np)
-            with state._audio_level_lock:
-                state._audio_level_db = level
-                if level > state._audio_level_peak:
-                    state._audio_level_peak = level
+            # Track max since last flush (lock-free local vars)
+            if level > _pending_level:
+                _pending_level = level
+            if level > _pending_peak:
+                _pending_peak = level
+
+            now_lvl = time.time()
+            if now_lvl - _last_level_update >= _level_update_interval:
+                with state._audio_level_lock:
+                    state._audio_level_db = _pending_level
+                    if _pending_peak > state._audio_level_peak:
+                        state._audio_level_peak = _pending_peak
+                _pending_level = -60.0
+                _pending_peak = -60.0
+                _last_level_update = now_lvl
 
             n = chunk_np.shape[0]
             if buffer_pos + n <= MAX_BUFFER_SAMPLES:

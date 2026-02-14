@@ -613,6 +613,14 @@ body {
   font-weight: 600;
 }
 
+/* Narrow phones (Galaxy Fold etc.) */
+@media (max-width: 360px) {
+  .modal {
+    width: 95vw;
+    max-width: none;
+  }
+}
+
 /* Prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -1,12 +1,27 @@
 import asyncio
 import collections
+import json as _json
 import logging
+import os
 import threading
 import time
 
 
 logger = logging.getLogger("app")
 logger.setLevel(logging.DEBUG)
+
+
+class JsonFormatter(logging.Formatter):
+    """Structured JSON log formatter for production log aggregation (ELK, Datadog)."""
+    def format(self, record):
+        return _json.dumps({
+            "timestamp": self.formatTime(record, datefmt="%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+            "module": record.module,
+            "line": record.lineno,
+        }, ensure_ascii=False)
 
 
 class LogBufferHandler(logging.Handler):
@@ -53,7 +68,10 @@ log_handler = LogBufferHandler()
 log_handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
 logger.addHandler(log_handler)
 
-# Also log to console
+# Also log to console — use JSON format if LOG_FORMAT=json
 console_handler = logging.StreamHandler()
-console_handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+if os.environ.get("LOG_FORMAT", "").lower() == "json":
+    console_handler.setFormatter(JsonFormatter())
+else:
+    console_handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
 logger.addHandler(console_handler)

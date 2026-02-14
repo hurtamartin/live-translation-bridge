@@ -375,6 +375,7 @@ body {
 [data-theme="light"] .log-container {
   background: #f0f0f5;
   color: #333;
+  border: 1px solid #c5c7cf;
 }
 
 .log-entry {
@@ -699,6 +700,24 @@ body {
 
   .toast {
     max-width: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .admin-slider-group {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-slider__value {
+    text-align: left;
+  }
+
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .confirm-dialog {
+    width: 95vw;
   }
 }
 
