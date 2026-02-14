@@ -10,13 +10,19 @@ Real-time speech translation system that captures audio from a microphone, trans
 - **Silero VAD** for accurate voice activity detection
 - **Audio resampling** — works with any device sample rate (auto-resamples to 16kHz)
 - **Audio preprocessing** — noise gate, normalization, high-pass filter
-- **Admin panel** (`/admin`) — device selection, parameter tuning, VU meter, real-time log
-- **Persistent configuration** — settings saved to `config.json`, restored on restart
+- **Admin panel** (`/admin`) — device selection, parameter tuning, VU meter, real-time log with level filtering
+- **Persistent configuration** — settings saved to `config.json`, restored on restart with validation
 - **Automatic source language detection** — optional model-based detection
-- **Internationalized UI** — frontend adapts to the selected language
-- **PWA support** — installable on mobile devices
+- **Internationalized UI** — viewer in 6 languages, admin panel in Czech/English
+- **PWA support** — installable on mobile devices, SW update notifications
 - **Dark/Light theme** with auto-detection
 - **GPU acceleration** — CUDA, MPS (Apple Silicon), or CPU fallback
+- **Dynamic QR code** — auto-generated from server URL for easy mobile access
+- **Accessibility** — WCAG AA compliant (focus indicators, contrast ratios, ARIA labels, focus traps)
+- **Security** — admin auth, WebSocket auth, rate limiting, CORS, config validation, connection limits
+- **Resilience** — graceful shutdown, audio device reconnect, heartbeat ping/pong, reconnect jitter, offline detection
+- **Structured logging** — optional JSON log format for production log aggregation (ELK, Datadog)
+- **Health check** — `/health` endpoint with 3-tier status (healthy/degraded/unhealthy)
 
 ## Requirements
 
@@ -62,10 +68,12 @@ chmod +x run_translation.sh
 ./run_translation.sh
 ```
 
-The server starts on `http://0.0.0.0:8888`.
+The server starts on `http://0.0.0.0:8888` by default (configurable via `config.env`).
 
-- **Viewer page**: `http://localhost:8888` — select language, view live subtitles
-- **Admin panel**: `http://localhost:8888/admin` — configure audio device, tuning parameters, monitor status
+- **Viewer page**: `http://<YOUR_IP>:<PORT>` — select language, view live subtitles
+- **Admin panel**: `http://<YOUR_IP>:<PORT>/admin` — configure audio device, tuning parameters, monitor status
+- **Health check**: `http://<YOUR_IP>:<PORT>/health` — system health status (no auth required)
+- **QR code**: `http://<YOUR_IP>:<PORT>/api/qr.svg` — dynamically generated QR code for the server URL
 
 ### Environment Variables
 
@@ -74,18 +82,32 @@ Create a `config.env` file in the project root (or set system environment variab
 ```env
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin
+HOST=0.0.0.0
+PORT=8888
 ```
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ADMIN_USERNAME` | `admin` | Admin panel login username |
 | `ADMIN_PASSWORD` | `admin` | Admin panel login password |
-| `CORS_ORIGINS` | *(empty — CORS disabled)* | Comma-separated allowed origins (e.g. `https://example.com,https://app.example.com`) |
+| `CORS_ORIGINS` | *(empty — CORS disabled)* | Comma-separated allowed origins (e.g. `https://example.com`) |
 | `MAX_CLIENTS` | `200` | Maximum concurrent WebSocket viewer connections |
 | `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `8888` | Server port |
+| `LOG_FORMAT` | *(empty — human-readable)* | Set to `json` for structured JSON logging |
+| `RATE_LIMIT_MAX` | `10` | Max admin API requests per second per IP |
 
 > **Note:** A warning is logged at startup if default credentials are used.
+
+### Preview Server
+
+For UI development without ML/audio dependencies:
+
+```bash
+python preview_server.py
+```
+
+Serves the full frontend with mock data (simulated audio levels, demo subtitles). Uses the same `config.env` for configuration.
 
 ### Uninstall
 
@@ -153,9 +175,10 @@ Microphone → sounddevice (native SR) → Resample to 16kHz → Silero VAD
 
 ```
 ├── app.py                      # Entry point (initialize + start server)
+├── config.env                  # Environment variables (port, credentials, etc.)
 ├── src/
-│   ├── config.py               # Configuration defaults, load/save, runtime_config
-│   ├── logging_handler.py      # Log buffer handler for admin panel
+│   ├── config.py               # Configuration defaults, load/save, validation
+│   ├── logging_handler.py      # Log buffer handler, optional JSON formatter
 │   ├── state.py                # Global state, locks, initialize()
 │   ├── server.py               # FastAPI app, routes, WebSocket, processing loop
 │   ├── audio/
@@ -169,16 +192,18 @@ Microphone → sounddevice (native SR) → Resample to 16kHz → Silero VAD
 │   └── admin.html              # Admin panel
 ├── static/
 │   ├── app.js                  # Viewer frontend (i18n, WebSocket, UI)
-│   ├── styles.css              # Viewer styles
+│   ├── styles.css              # Viewer styles (WCAG AA)
 │   ├── admin.js                # Admin frontend (i18n cs/en)
 │   ├── admin.css               # Admin styles
-│   ├── sw.js                   # Service Worker (PWA)
+│   ├── sw.js                   # Service Worker (PWA offline cache)
 │   ├── manifest.json           # PWA manifest
-│   └── assets/                 # Favicon, QR code
+│   └── assets/                 # Favicon, icons (192/512 PNG)
 ├── preview_server.py           # Standalone mock server for UI development
 ├── requirements.txt            # Python dependencies
 ├── run_translation.bat         # Windows launch script
-└── run_translation.sh          # macOS/Linux launch script
+├── run_translation.sh          # macOS/Linux launch script
+├── uninstall.bat               # Windows uninstall script
+└── uninstall.sh                # macOS/Linux uninstall script
 ```
 
 ## Contributing
