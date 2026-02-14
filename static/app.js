@@ -37,6 +37,9 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live P\u0159eklad',
     qrInstruction: 'P\u0159ipojte se na Wi-Fi a naskenujte k\u00f3d',
     pageTitle: 'Live P\u0159eklad',
+    offline: 'Offline re\u017eim',
+    updateAvailable: 'Nov\u00e1 verze k dispozici',
+    updateReload: 'Aktualizovat',
   },
   eng: {
     waitingForTranslation: 'Waiting for translation...',
@@ -57,6 +60,9 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live Translation',
     qrInstruction: 'Connect to Wi-Fi and scan the code',
     pageTitle: 'Live Translation',
+    offline: 'Offline mode',
+    updateAvailable: 'New version available',
+    updateReload: 'Reload',
   },
   spa: {
     waitingForTranslation: 'Esperando traducción...',
@@ -77,6 +83,9 @@ const TRANSLATIONS = {
     qrPageTitle: 'Traducción en vivo',
     qrInstruction: 'Conéctese al Wi-Fi y escanee el código',
     pageTitle: 'Traducción en vivo',
+    offline: 'Sin conexión',
+    updateAvailable: 'Nueva versión disponible',
+    updateReload: 'Recargar',
   },
   ukr: {
     waitingForTranslation: '\u041E\u0447\u0456\u043A\u0443\u0432\u0430\u043D\u043D\u044F \u043F\u0435\u0440\u0435\u043A\u043B\u0430\u0434\u0443...',
@@ -97,6 +106,9 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434',
     qrInstruction: '\u041F\u0456\u0434\u043A\u043B\u044E\u0447\u0456\u0442\u044C\u0441\u044F \u0434\u043E Wi-Fi \u0442\u0430 \u0432\u0456\u0434\u0441\u043A\u0430\u043D\u0443\u0439\u0442\u0435 \u043A\u043E\u0434',
     pageTitle: 'Live \u041F\u0435\u0440\u0435\u043A\u043B\u0430\u0434',
+    offline: '\u041E\u0444\u043B\u0430\u0439\u043D',
+    updateAvailable: '\u0414\u043E\u0441\u0442\u0443\u043F\u043D\u0430 \u043D\u043E\u0432\u0430 \u0432\u0435\u0440\u0441\u0456\u044F',
+    updateReload: '\u041E\u043D\u043E\u0432\u0438\u0442\u0438',
   },
   deu: {
     waitingForTranslation: 'Warte auf \u00dcbersetzung...',
@@ -117,6 +129,9 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live \u00dcbersetzung',
     qrInstruction: 'Verbinden Sie sich mit dem WLAN und scannen Sie den Code',
     pageTitle: 'Live \u00dcbersetzung',
+    offline: 'Offline-Modus',
+    updateAvailable: 'Neue Version verf\u00fcgbar',
+    updateReload: 'Aktualisieren',
   },
   pol: {
     waitingForTranslation: 'Oczekiwanie na t\u0142umaczenie...',
@@ -137,15 +152,21 @@ const TRANSLATIONS = {
     qrPageTitle: 'Live T\u0142umaczenie',
     qrInstruction: 'Po\u0142\u0105cz si\u0119 z Wi-Fi i zeskanuj kod',
     pageTitle: 'Live T\u0142umaczenie',
+    offline: 'Tryb offline',
+    updateAvailable: 'Dost\u0119pna nowa wersja',
+    updateReload: 'Od\u015bwie\u017c',
   },
 };
 
 const CONFIG = {
   RECONNECT_BASE: 1000,
   RECONNECT_MAX: 30000,
+  MAX_SUBTITLE_LENGTH: 500,
   DEFAULT_LANG: 'ces',
   DEFAULT_MAX_SUBTITLES: 10,
   DEFAULT_FONT_SIZE: 28,
+  PING_INTERVAL: 30000,
+  PING_TIMEOUT: 5000,
 };
 
 /* ========== State ========== */
@@ -165,6 +186,9 @@ const state = {
   previousFocus: null,
   autoHideTimer: null,
   switchingLanguage: false,
+  switchingTimeout: null,
+  pingInterval: null,
+  pingTimeout: null,
 };
 
 /* ========== DOM References ========== */
@@ -300,28 +324,52 @@ function connect() {
 
     // Send current language preference to backend
     state.ws.send(JSON.stringify({ type: 'set_lang', lang: state.language }));
+
+    // Start heartbeat ping
+    clearInterval(state.pingInterval);
+    state.pingInterval = setInterval(function() {
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: 'ping' }));
+        // If no pong within timeout, force reconnect
+        state.pingTimeout = setTimeout(function() {
+          console.warn('[WS] Ping timeout — reconnecting');
+          if (state.ws) state.ws.close();
+        }, CONFIG.PING_TIMEOUT);
+      }
+    }, CONFIG.PING_INTERVAL);
   };
 
   state.ws.onmessage = function(event) {
-    // Backend sends JSON {"type":"subtitle","text":"..."} or plain text (fallback)
+    // Backend sends JSON {"type":"subtitle","text":"..."} or {"type":"pong"}
     var text = '';
     try {
       var data = JSON.parse(event.data);
-      if (data.type === 'subtitle' && data.text) {
+      if (data.type === 'pong') {
+        clearTimeout(state.pingTimeout);
+        return;
+      }
+      if (data.type === 'subtitle' && typeof data.text === 'string') {
         text = data.text;
       }
     } catch (e) {
-      // Fallback: plain text from older backend
-      text = event.data;
+      console.warn('[WS] Invalid message format:', e.message);
+      return;
     }
-    if (text && text.trim()) {
-      addSubtitle(text.trim());
+    if (!text) return;
+    // Sanitize: limit length, strip RTL/LTR override characters
+    text = text.substring(0, CONFIG.MAX_SUBTITLE_LENGTH)
+               .replace(/[\u202A-\u202E\u200F\u200E\u061C\u2066-\u2069]/g, '')
+               .trim();
+    if (text) {
+      addSubtitle(text);
     }
   };
 
   state.ws.onclose = function() {
     console.log('[WS] Disconnected');
     state.connected = false;
+    clearInterval(state.pingInterval);
+    clearTimeout(state.pingTimeout);
     setStatus('error');
     releaseWakeLock();
     scheduleReconnect();
@@ -336,7 +384,10 @@ function connect() {
 function scheduleReconnect() {
   if (state.reconnectTimer) return;
 
-  var delay = state.reconnectDelay;
+  // Add random jitter ±25% to prevent thundering herd
+  var baseDelay = state.reconnectDelay;
+  var jitter = baseDelay * (0.5 * Math.random() - 0.25);
+  var delay = Math.max(baseDelay + jitter, 500);
   var remaining = Math.round(delay / 1000);
   setStatus('error', t('disconnectedTimer').replace('{0}', remaining));
 
@@ -370,7 +421,9 @@ function changeLanguage(langCode) {
 
   // Update active state in language modal
   document.querySelectorAll('.lang-option').forEach(function(btn) {
-    btn.classList.toggle('lang-option--active', btn.dataset.lang === langCode);
+    var isActive = btn.dataset.lang === langCode;
+    btn.classList.toggle('lang-option--active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
 
   // Clear current subtitles and show "switching" state
@@ -385,6 +438,25 @@ function changeLanguage(langCode) {
     }
   }
 
+  // Disable language buttons during switch
+  var langButtons = document.querySelectorAll('.lang-option');
+  langButtons.forEach(function(b) { b.disabled = true; });
+  dom.langFab.disabled = true;
+
+  // Timeout: reset switching state after 10s if no subtitle arrives
+  clearTimeout(state.switchingTimeout);
+  state.switchingTimeout = setTimeout(function() {
+    if (state.switchingLanguage) {
+      state.switchingLanguage = false;
+      langButtons.forEach(function(b) { b.disabled = false; });
+      dom.langFab.disabled = false;
+      if (dom.emptyState) {
+        var txt = dom.emptyState.querySelector('.empty__text');
+        if (txt) txt.textContent = t('waitingForTranslation');
+      }
+    }
+  }, 10000);
+
   // Send language change to backend
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify({ type: 'set_lang', lang: langCode }));
@@ -398,7 +470,13 @@ function changeLanguage(langCode) {
 
 function addSubtitle(text) {
   // Hide empty state and reset switching flag
-  state.switchingLanguage = false;
+  if (state.switchingLanguage) {
+    state.switchingLanguage = false;
+    clearTimeout(state.switchingTimeout);
+    // Re-enable language buttons
+    document.querySelectorAll('.lang-option').forEach(function(b) { b.disabled = false; });
+    dom.langFab.disabled = false;
+  }
   if (dom.emptyState) {
     dom.emptyState.style.display = 'none';
   }
@@ -476,6 +554,8 @@ function applySettings() {
 
 function buildLanguageOptions() {
   dom.langOptions.innerHTML = '';
+  dom.langOptions.setAttribute('role', 'listbox');
+  dom.langOptions.setAttribute('aria-label', t('selectLanguage'));
   LANGUAGES.forEach(function(lang) {
     var btn = document.createElement('button');
     btn.className = 'lang-option';
@@ -484,11 +564,26 @@ function buildLanguageOptions() {
     }
     btn.dataset.lang = lang.code;
     btn.setAttribute('tabindex', '0');
+    btn.setAttribute('role', 'option');
+    btn.setAttribute('aria-selected', lang.code === state.language ? 'true' : 'false');
+    btn.setAttribute('aria-label', lang.name + ' (' + lang.desc + ')');
 
-    btn.innerHTML =
-      '<span class="lang-option__flag">' + lang.flag + '</span>' +
-      '<span class="lang-option__name">' + lang.name + '</span>' +
-      '<span class="lang-option__desc">' + lang.desc + '</span>';
+    var flagSpan = document.createElement('span');
+    flagSpan.className = 'lang-option__flag';
+    flagSpan.setAttribute('aria-hidden', 'true');
+    flagSpan.textContent = lang.flag;
+
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'lang-option__name';
+    nameSpan.textContent = lang.name;
+
+    var descSpan = document.createElement('span');
+    descSpan.className = 'lang-option__desc';
+    descSpan.textContent = lang.desc;
+
+    btn.appendChild(flagSpan);
+    btn.appendChild(nameSpan);
+    btn.appendChild(descSpan);
 
     dom.langOptions.appendChild(btn);
   });
@@ -504,10 +599,35 @@ function openModal(overlay) {
   if (focusable) {
     requestAnimationFrame(function() { focusable.focus(); });
   }
+  // Install focus trap
+  overlay._focusTrap = function(e) {
+    if (e.key !== 'Tab') return;
+    var focusableEls = overlay.querySelectorAll('button, [tabindex="0"], input, select, a, [tabindex]:not([tabindex="-1"])');
+    if (focusableEls.length === 0) return;
+    var first = focusableEls[0];
+    var last = focusableEls[focusableEls.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
+  overlay.addEventListener('keydown', overlay._focusTrap);
 }
 
 function closeModal(overlay) {
   overlay.classList.remove('modal-overlay--open');
+  // Remove focus trap
+  if (overlay._focusTrap) {
+    overlay.removeEventListener('keydown', overlay._focusTrap);
+    overlay._focusTrap = null;
+  }
   if (state.previousFocus) {
     state.previousFocus.focus();
     state.previousFocus = null;
@@ -535,9 +655,15 @@ function initEventListeners() {
 
   dom.langOptions.addEventListener('click', function(e) {
     var btn = e.target.closest('.lang-option');
-    if (btn && btn.dataset.lang) {
+    if (btn && btn.dataset.lang && !btn.disabled) {
       changeLanguage(btn.dataset.lang);
       closeModal(dom.langModal);
+      // Debounce: disable all lang buttons for 500ms
+      var buttons = document.querySelectorAll('.lang-option');
+      buttons.forEach(function(b) { b.disabled = true; });
+      setTimeout(function() {
+        buttons.forEach(function(b) { b.disabled = false; });
+      }, 500);
     }
   });
 
@@ -673,11 +799,54 @@ function setupAutoHide() {
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/static/sw.js').then(function() {
+    navigator.serviceWorker.register('/static/sw.js').then(function(registration) {
       console.log('[SW] Registered');
+      // Listen for updates
+      registration.addEventListener('updatefound', function() {
+        var newWorker = registration.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', function() {
+          if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+            // New version available — show update banner
+            var banner = document.createElement('div');
+            banner.className = 'update-banner';
+            banner.innerHTML = '<span>' + t('updateAvailable') + '</span>';
+            var btn = document.createElement('button');
+            btn.className = 'update-banner__btn';
+            btn.textContent = t('updateReload');
+            btn.addEventListener('click', function() { window.location.reload(); });
+            banner.appendChild(btn);
+            document.body.appendChild(banner);
+          }
+        });
+      });
     }).catch(function(err) {
       console.error('[SW] Registration failed:', err);
     });
+  }
+}
+
+/* ========== Offline Detection ========== */
+
+function setupOfflineDetection() {
+  // Create offline banner (inserted at top of body)
+  var banner = document.createElement('div');
+  banner.id = 'offlineBanner';
+  banner.className = 'offline-banner';
+  banner.textContent = t('offline');
+  banner.style.display = 'none';
+  document.body.appendChild(banner);
+
+  window.addEventListener('offline', function() {
+    banner.textContent = t('offline');
+    banner.style.display = '';
+  });
+  window.addEventListener('online', function() {
+    banner.style.display = 'none';
+  });
+  // Show immediately if already offline
+  if (!navigator.onLine) {
+    banner.style.display = '';
   }
 }
 
@@ -690,6 +859,7 @@ function init() {
   updateUILanguage();
   initEventListeners();
   setupAutoHide();
+  setupOfflineDetection();
   registerServiceWorker();
   connect();
 }

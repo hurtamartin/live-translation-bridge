@@ -1,3 +1,5 @@
+import queue
+
 import numpy as np
 import sounddevice as sd
 import torch
@@ -96,10 +98,13 @@ def restart_audio_stream(device_index, channel, state):
         if state.audio_stream is not None:
             try:
                 state.audio_stream.stop()
-                state.audio_stream.close()
-                logger.info("Previous audio stream stopped.")
             except Exception as e:
                 logger.warning(f"Error stopping audio stream: {e}")
+            try:
+                state.audio_stream.close()
+            except Exception as e:
+                logger.warning(f"Error closing audio stream: {e}")
+            logger.info("Previous audio stream stopped.")
             state.audio_stream = None
 
         # Determine native sample rate of the device
@@ -128,20 +133,43 @@ def restart_audio_stream(device_index, channel, state):
             channels_to_open = max(channels_to_open, channel + 1)
 
         audio_queue = state.audio_queue
+        device_error = state.audio_device_error
 
         def audio_callback(indata, frames, time_info, status):
-            if status:
-                logger.warning(f"Audio status: {status}")
-            audio_queue.put(indata.copy())
+            try:
+                if status:
+                    logger.warning(f"Audio status: {status}")
+                    if status.input_overflow:
+                        return  # drop chunk on overflow, don't signal error
+                    if status.input_underflow or "error" in str(status).lower():
+                        device_error.set()
+                        return
+                audio_queue.put_nowait(indata.copy())
+            except queue.Full:
+                pass  # drop chunk if queue full — better than blocking callback
+            except Exception as e:
+                logger.error(f"Audio callback error: {e}")
+                device_error.set()
 
         def multi_channel_callback(indata, frames, time_info, status):
-            if status:
-                logger.warning(f"Audio status: {status}")
-            ch = runtime_config["audio_channel"]
-            if ch < indata.shape[1]:
-                audio_queue.put(indata[:, ch:ch+1].copy())
-            else:
-                audio_queue.put(indata[:, 0:1].copy())
+            try:
+                if status:
+                    logger.warning(f"Audio status: {status}")
+                    if status.input_overflow:
+                        return
+                    if status.input_underflow or "error" in str(status).lower():
+                        device_error.set()
+                        return
+                ch = runtime_config["audio_channel"]
+                if ch < indata.shape[1]:
+                    audio_queue.put_nowait(indata[:, ch:ch+1].copy())
+                else:
+                    audio_queue.put_nowait(indata[:, 0:1].copy())
+            except queue.Full:
+                pass
+            except Exception as e:
+                logger.error(f"Audio callback error: {e}")
+                device_error.set()
 
         try:
             if channel > 0 or (device_index is not None and channels_to_open > 1):

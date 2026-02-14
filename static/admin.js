@@ -5,88 +5,89 @@
 var ADMIN_TRANSLATIONS = {
   cs: {
     adminTitle: 'Admin Panel',
-    mainPage: 'Hlavni stranka',
+    mainPage: 'Hlavní stránka',
     statusTitle: 'Status',
     clients: 'Klienti',
     languages: 'Jazyky',
     hardware: 'Hardware',
     uptime: 'Uptime',
-    audioDeviceTitle: 'Audio zarizeni',
-    device: 'Zarizeni',
-    channel: 'Kanal',
-    apply: 'Pouzit',
-    loading: 'Nacitam...',
-    systemDefault: '-- Systemovy vychozi --',
-    inputSignalTitle: 'Vstupni signal',
-    translationParamsTitle: 'Parametry prekladu',
+    audioDeviceTitle: 'Audio zařízení',
+    device: 'Zařízení',
+    channel: 'Kanál',
+    apply: 'Použít',
+    loading: 'Načítám...',
+    systemDefault: '-- Systémový výchozí --',
+    inputSignalTitle: 'Vstupní signál',
+    translationParamsTitle: 'Parametry překladu',
     silenceDuration: 'Silence Duration',
     minChunkDuration: 'Min Chunk Duration',
     maxChunkDuration: 'Max Chunk Duration',
     contextOverlap: 'Context Overlap',
     defaultTargetLang: 'Default Target Language',
-    defaults: 'Vychozi',
+    defaults: 'Výchozí',
     export: 'Export',
     import: 'Import',
     preprocessingTitle: 'Audio preprocessing',
-    preprocessingDesc: 'Zpracovani vstupniho signalu pred odeslanim do modelu. Zapnete jen to, co potrebujete.',
+    preprocessingDesc: 'Zpracování vstupního signálu před odesláním do modelu. Zapněte jen to, co potřebujete.',
     noiseGate: 'Noise Gate',
-    noiseGateHint: 'Ztisi audio pod prahem hlasitosti',
+    noiseGateHint: 'Ztišení audia pod prahem hlasitosti',
     threshold: 'Threshold',
     volumeNormalize: 'Normalizace hlasitosti',
-    volumeNormalizeHint: 'Vyrovnava uroven hlasitosti',
+    volumeNormalizeHint: 'Vyrovnává úroveň hlasitosti',
     targetLevel: 'Target level',
     highpassFilter: 'High-pass filtr',
-    highpassHint: 'Odrizne hluboke frekvence pod reci',
+    highpassHint: 'Ořízne hluboké frekvence pod řečí',
     cutoff: 'Cutoff',
-    autoLangDetect: 'Automaticka detekce zdrojoveho jazyka',
-    autoLangHint: 'Model se pokusi detekovat jazyk reci',
-    performanceTitle: 'Vykon',
-    totalTranslations: 'Celkem prekladu',
+    autoLangDetect: 'Automatická detekce zdrojového jazyka',
+    autoLangHint: 'Model se pokusí detekovat jazyk řeči',
+    performanceTitle: 'Výkon',
+    totalTranslations: 'Celkem překladů',
     encoderAvg: 'Encoder (avg)',
     decoderAvg: 'Decoder (avg)',
-    gpuMemory: 'GPU pamet',
-    connectedClientsTitle: 'Pripojeni klienti',
+    gpuMemory: 'GPU paměť',
+    connectedClientsTitle: 'Připojení klienti',
     thId: 'ID',
     thLang: 'Jazyk',
     thIp: 'IP',
-    thConnected: 'Pripojeno',
-    noClients: 'Zadni klienti',
-    translationHistoryTitle: 'Historie prekladu',
+    thConnected: 'Připojeno',
+    noClients: 'Žádní klienti',
+    translationHistoryTitle: 'Historie překladů',
     refresh: 'Obnovit',
-    noTranslations: 'Zatim zadne preklady',
+    noTranslations: 'Zatím žádné překlady',
     logTitle: 'Log',
     autoScroll: 'Auto-scroll',
     clearLog: 'Vymazat',
-    confirmCancel: 'Zrusit',
+    confirmCancel: 'Zrušit',
     confirmReset: 'Ano, resetovat',
     // Toast / dynamic messages
-    saving: 'Ukladam...',
-    saved: 'Ulozeno',
-    connectionError: 'Chyba spojeni',
-    serverConnectionError: 'Chyba spojeni se serverem',
-    saveError: 'Chyba ukladani',
-    defaultsRestored: 'Vychozi nastaveni obnovena',
-    configExported: 'Konfigurace exportovana',
+    saving: 'Ukládám...',
+    saved: 'Uloženo',
+    connectionError: 'Chyba spojení',
+    serverConnectionError: 'Chyba spojení se serverem',
+    saveError: 'Chyba ukládání',
+    defaultsRestored: 'Výchozí nastavení obnovena',
+    configExported: 'Konfigurace exportována',
     exportError: 'Chyba exportu',
-    configImported: 'Konfigurace importovana',
+    configImported: 'Konfigurace importována',
     importError: 'Chyba importu',
-    invalidJson: 'Neplatny JSON soubor',
-    deviceChanged: 'Audio zarizeni zmeneno',
-    deviceLoadError: 'Chyba nacitani zarizeni',
-    unknownError: 'Neznama chyba',
+    invalidJson: 'Neplatný JSON soubor',
+    fileTooLarge: 'Soubor je příliš velký (max 100 KB)',
+    deviceChanged: 'Audio zařízení změněno',
+    deviceLoadError: 'Chyba načítání zařízení',
+    unknownError: 'Neznámá chyba',
     error: 'Chyba',
     ok: 'OK!',
-    confirmResetText: 'Opravdu chcete resetovat vsechna nastaveni na vychozi hodnoty? Tato akce je nevratna.',
+    confirmResetText: 'Opravdu chcete resetovat všechna nastavení na výchozí hodnoty? Tato akce je nevratná.',
     stopped: 'Stopped',
     pending: 'Pending',
-    statusParseError: 'Chyba zpracovani statusu',
-    configLoadError: 'Chyba nacteni konfigurace',
-    logParseError: 'Chyba zpracovani logu',
-    metricsLoadError: 'Chyba nacteni metrik',
-    sessionsLoadError: 'Chyba nacteni sessions',
-    translationsLoadError: 'Chyba nacteni prekladu',
-    audioHistoryError: 'Chyba nacteni audio historie',
-    keys: 'klicu',
+    statusParseError: 'Chyba zpracování statusu',
+    configLoadError: 'Chyba načtení konfigurace',
+    logParseError: 'Chyba zpracování logu',
+    metricsLoadError: 'Chyba načtení metrik',
+    sessionsLoadError: 'Chyba načtení sessions',
+    translationsLoadError: 'Chyba načtení překladů',
+    audioHistoryError: 'Chyba načtení audio historie',
+    keys: 'klíčů',
     mono: 'Mono',
   },
   en: {
@@ -157,6 +158,7 @@ var ADMIN_TRANSLATIONS = {
     configImported: 'Configuration imported',
     importError: 'Import error',
     invalidJson: 'Invalid JSON file',
+    fileTooLarge: 'File too large (max 100 KB)',
     deviceChanged: 'Audio device changed',
     deviceLoadError: 'Error loading devices',
     unknownError: 'Unknown error',
@@ -207,9 +209,21 @@ var adminState = {
   saveDebounceTimer: null,
   ppSaveTimer: null,
   lang: localStorage.getItem('adminLang') || 'cs',
+  logFilterLevels: JSON.parse(localStorage.getItem('logFilterLevels') || '{"DEBUG":true,"INFO":true,"WARNING":true,"ERROR":true}'),
 };
 
 var MAX_LOG_ENTRIES = 200;
+
+function getAdminWsUrl(path) {
+  var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var base = protocol + '//' + window.location.host + path;
+  // Browser WebSocket API cannot send custom headers, so we pass the
+  // auth token as a query parameter. The token is injected by the server
+  // into admin.html via a <meta> tag when the page is rendered.
+  var meta = document.querySelector('meta[name="ws-token"]');
+  var token = meta ? meta.getAttribute('content') : '';
+  return token ? base + '?token=' + encodeURIComponent(token) : base;
+}
 
 /* ========== DOM ========== */
 
@@ -283,6 +297,7 @@ var dom = {
   logContainer: document.getElementById('logContainer'),
   logAutoScroll: document.getElementById('logAutoScroll'),
   clearLog: document.getElementById('clearLog'),
+  logFilters: document.getElementById('logFilters'),
   // Confirm
   confirmOverlay: document.getElementById('confirmOverlay'),
   confirmText: document.getElementById('confirmText'),
@@ -397,35 +412,38 @@ function setDot(el, status) {
 }
 
 function handleStatusData(data) {
+  if (!data) return;
   var c = data.components || {};
 
   if (c.model) {
-    setDot(dom.dotModel, c.model.status);
-    var modelDetail = c.model.device.toUpperCase();
+    setDot(dom.dotModel, c.model.status || 'stopped');
+    var modelDevice = (c.model.device || 'unknown').toUpperCase();
+    var modelDetail = modelDevice;
     if (c.model.gpu_name) modelDetail += ' (' + c.model.gpu_name + ')';
     dom.detailModel.textContent = modelDetail;
   }
   if (c.vad) {
-    setDot(dom.dotVad, c.vad.status);
-    dom.detailVad.textContent = c.vad.type;
+    setDot(dom.dotVad, c.vad.status || 'stopped');
+    dom.detailVad.textContent = c.vad.type || 'unknown';
   }
   if (c.audio_stream) {
-    setDot(dom.dotAudio, c.audio_stream.status);
+    setDot(dom.dotAudio, c.audio_stream.status || 'stopped');
     if (c.audio_stream.status === 'running') {
-      dom.detailAudio.textContent = c.audio_stream.device_name + ' ch' + c.audio_stream.channel;
+      dom.detailAudio.textContent = (c.audio_stream.device_name || '?') + ' ch' + (c.audio_stream.channel || 0);
     } else {
       dom.detailAudio.textContent = adminT('stopped');
     }
   }
   if (c.inference_executor) {
-    setDot(dom.dotInference, c.inference_executor.status);
-    dom.detailInference.textContent = adminT('pending') + ': ' + c.inference_executor.pending_tasks;
+    setDot(dom.dotInference, c.inference_executor.status || 'stopped');
+    dom.detailInference.textContent = adminT('pending') + ': ' + (c.inference_executor.pending_tasks || 0);
   }
 
-  dom.infoClients.textContent = adminT('clients') + ': ' + data.clients;
-  dom.infoLanguages.textContent = adminT('languages') + ': ' + (data.active_languages.length > 0 ? data.active_languages.join(', ') : '--');
-  dom.infoDevice.textContent = adminT('hardware') + ': ' + data.device.toUpperCase();
-  dom.infoUptime.textContent = adminT('uptime') + ': ' + formatUptime(data.uptime);
+  dom.infoClients.textContent = adminT('clients') + ': ' + (data.clients || 0);
+  var langs = data.active_languages || [];
+  dom.infoLanguages.textContent = adminT('languages') + ': ' + (langs.length > 0 ? langs.join(', ') : '--');
+  dom.infoDevice.textContent = adminT('hardware') + ': ' + ((data.device || 'unknown').toUpperCase());
+  dom.infoUptime.textContent = adminT('uptime') + ': ' + formatUptime(data.uptime || 0);
 
   // VU Meter with peak hold
   if (data.audio_level_db !== undefined) {
@@ -441,11 +459,14 @@ function handleStatusData(data) {
   }
 }
 
-function connectStatusWs() {
-  var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  var url = protocol + '//' + window.location.host + '/api/status/ws';
+var statusWsBackoff = 3000;
 
-  adminState.statusWs = new WebSocket(url);
+function connectStatusWs() {
+  adminState.statusWs = new WebSocket(getAdminWsUrl('/api/status/ws'));
+
+  adminState.statusWs.onopen = function() {
+    statusWsBackoff = 3000; // reset on success
+  };
 
   adminState.statusWs.onmessage = function(event) {
     try {
@@ -458,7 +479,8 @@ function connectStatusWs() {
   };
 
   adminState.statusWs.onclose = function() {
-    setTimeout(connectStatusWs, 3000);
+    setTimeout(connectStatusWs, statusWsBackoff);
+    statusWsBackoff = Math.min(statusWsBackoff * 2, 30000);
   };
 
   adminState.statusWs.onerror = function(err) {
@@ -520,6 +542,15 @@ function loadConfig() {
       console.error('Config load error:', err);
       showToast(adminT('configLoadError'), 'error');
     });
+}
+
+/* ========== Debounce helper ========== */
+
+var _debounceTimers = {};
+
+function debounce(key, fn, delay) {
+  clearTimeout(_debounceTimers[key]);
+  _debounceTimers[key] = setTimeout(fn, delay || 500);
 }
 
 /* ========== Auto-save: Translation Parameters ========== */
@@ -616,6 +647,11 @@ function importConfig() {
 function handleImportFile(e) {
   var file = e.target.files[0];
   if (!file) return;
+  if (file.size > 102400) {
+    showToast(adminT('fileTooLarge'), 'error');
+    e.target.value = '';
+    return;
+  }
   var reader = new FileReader();
   reader.onload = function(ev) {
     try {
@@ -629,7 +665,12 @@ function handleImportFile(e) {
         .then(function(data) {
           if (data.ok) {
             syncConfigUI(data.config);
-            showToast(adminT('configImported') + ' (' + data.imported + ' ' + adminT('keys') + ')', 'success');
+            var msg = adminT('configImported') + ' (' + data.imported + ' ' + adminT('keys') + ')';
+            if (data.errors) {
+              msg += ', ' + Object.keys(data.errors).length + ' rejected';
+              console.warn('Config import rejected keys:', data.errors);
+            }
+            showToast(msg, data.errors ? 'warning' : 'success');
           } else {
             showToast(adminT('importError') + ': ' + (data.error || ''), 'error');
           }
@@ -740,10 +781,20 @@ function applyDeviceSelection() {
 
 /* ========== Audio History Graph ========== */
 
+var _lastAudioHistoryHash = '';
+
 function fetchAudioHistory() {
+  // Skip if tab is hidden
+  if (document.hidden) return;
+
   fetch('/api/audio-history')
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      // Simple change detection: compare length + last entry
+      var hash = data.length + '_' + (data.length > 0 ? data[data.length - 1].db : '');
+      if (hash === _lastAudioHistoryHash) return;
+      _lastAudioHistoryHash = hash;
+
       adminState.audioHistoryData = data;
       drawAudioHistory();
     })
@@ -834,13 +885,25 @@ function fetchSessions() {
     .then(function(r) { return r.json(); })
     .then(function(sessions) {
       if (sessions.length === 0) {
-        dom.sessionsBody.innerHTML = '<tr><td colspan="4" class="sessions-table__empty">' + adminT('noClients') + '</td></tr>';
+        dom.sessionsBody.innerHTML = '';
+        var emptyTr = document.createElement('tr');
+        var emptyTd = document.createElement('td');
+        emptyTd.colSpan = 4;
+        emptyTd.className = 'sessions-table__empty';
+        emptyTd.textContent = adminT('noClients');
+        emptyTr.appendChild(emptyTd);
+        dom.sessionsBody.appendChild(emptyTr);
         return;
       }
       dom.sessionsBody.innerHTML = '';
       sessions.forEach(function(s) {
         var tr = document.createElement('tr');
-        tr.innerHTML = '<td>' + s.id + '</td><td>' + s.lang + '</td><td>' + s.ip + '</td><td>' + formatUptime(s.connected_for) + '</td>';
+        var cells = [s.id, s.lang, s.ip, formatUptime(s.connected_for)];
+        cells.forEach(function(text) {
+          var td = document.createElement('td');
+          td.textContent = text;
+          tr.appendChild(td);
+        });
         dom.sessionsBody.appendChild(tr);
       });
     })
@@ -857,17 +920,29 @@ function fetchTranslations() {
     .then(function(r) { return r.json(); })
     .then(function(entries) {
       if (entries.length === 0) {
-        dom.translationHistory.innerHTML = '<div class="translation-history__empty">' + adminT('noTranslations') + '</div>';
+        dom.translationHistory.innerHTML = '';
+        var emptyDiv = document.createElement('div');
+        emptyDiv.className = 'translation-history__empty';
+        emptyDiv.textContent = adminT('noTranslations');
+        dom.translationHistory.appendChild(emptyDiv);
         return;
       }
       dom.translationHistory.innerHTML = '';
       entries.reverse().forEach(function(entry) {
         var el = document.createElement('div');
         el.className = 'translation-entry';
-        var langs = Object.keys(entry.translations).map(function(lang) {
-          return '<span class="translation-entry__lang">' + lang + '</span> ' + entry.translations[lang];
-        }).join('<br>');
-        el.innerHTML = '<span class="translation-entry__time">' + entry.time + '</span>' + langs;
+        var timeSpan = document.createElement('span');
+        timeSpan.className = 'translation-entry__time';
+        timeSpan.textContent = entry.time;
+        el.appendChild(timeSpan);
+        Object.keys(entry.translations).forEach(function(lang) {
+          var langSpan = document.createElement('span');
+          langSpan.className = 'translation-entry__lang';
+          langSpan.textContent = lang;
+          el.appendChild(langSpan);
+          el.appendChild(document.createTextNode(' ' + entry.translations[lang]));
+          el.appendChild(document.createElement('br'));
+        });
         dom.translationHistory.appendChild(el);
       });
     })
@@ -879,12 +954,38 @@ function fetchTranslations() {
 
 /* ========== Log WebSocket ========== */
 
-function addLogEntry(entry) {
-  var el = document.createElement('div');
-  el.className = 'log-entry log-entry--' + entry.level;
-  el.textContent = '[' + entry.time + '] ' + entry.level + ' ' + entry.message;
-  dom.logContainer.appendChild(el);
+var _logBatchQueue = [];
+var _logBatchRaf = null;
 
+function addLogEntry(entry) {
+  _logBatchQueue.push(entry);
+  if (!_logBatchRaf) {
+    _logBatchRaf = requestAnimationFrame(_flushLogBatch);
+  }
+}
+
+function _flushLogBatch() {
+  _logBatchRaf = null;
+  var batch = _logBatchQueue;
+  _logBatchQueue = [];
+  if (batch.length === 0) return;
+
+  var fragment = document.createDocumentFragment();
+  for (var i = 0; i < batch.length; i++) {
+    var entry = batch[i];
+    var el = document.createElement('div');
+    el.className = 'log-entry log-entry--' + entry.level;
+    el.setAttribute('data-level', entry.level);
+    el.textContent = '[' + entry.time + '] ' + entry.level + ' ' + entry.message;
+    // Apply filter
+    if (!adminState.logFilterLevels[entry.level]) {
+      el.classList.add('log-entry--filtered');
+    }
+    fragment.appendChild(el);
+  }
+  dom.logContainer.appendChild(fragment);
+
+  // Trim excess in one pass
   while (dom.logContainer.children.length > MAX_LOG_ENTRIES) {
     dom.logContainer.removeChild(dom.logContainer.firstChild);
   }
@@ -894,11 +995,14 @@ function addLogEntry(entry) {
   }
 }
 
-function connectLogWs() {
-  var protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  var url = protocol + '//' + window.location.host + '/api/logs';
+var logWsBackoff = 3000;
 
-  adminState.logWs = new WebSocket(url);
+function connectLogWs() {
+  adminState.logWs = new WebSocket(getAdminWsUrl('/api/logs'));
+
+  adminState.logWs.onopen = function() {
+    logWsBackoff = 3000; // reset on success
+  };
 
   adminState.logWs.onmessage = function(event) {
     try {
@@ -915,7 +1019,8 @@ function connectLogWs() {
   };
 
   adminState.logWs.onclose = function() {
-    setTimeout(connectLogWs, 3000);
+    setTimeout(connectLogWs, logWsBackoff);
+    logWsBackoff = Math.min(logWsBackoff * 2, 30000);
   };
 
   adminState.logWs.onerror = function(err) {
@@ -966,35 +1071,43 @@ function initEvents() {
   dom.importConfig.addEventListener('click', importConfig);
   dom.importConfigFile.addEventListener('change', handleImportFile);
 
-  // Preprocessing — auto-save
+  // Preprocessing — auto-save (debounced)
   dom.ppNoiseGate.addEventListener('change', function() {
     togglePreprocessSettings(dom.ppNoiseGate, dom.ppNoiseGateSettings);
-    autoSavePreprocess();
+    debounce('preprocess', autoSavePreprocess);
   });
   dom.ppNormalize.addEventListener('change', function() {
     togglePreprocessSettings(dom.ppNormalize, dom.ppNormalizeSettings);
-    autoSavePreprocess();
+    debounce('preprocess', autoSavePreprocess);
   });
   dom.ppHighpass.addEventListener('change', function() {
     togglePreprocessSettings(dom.ppHighpass, dom.ppHighpassSettings);
-    autoSavePreprocess();
+    debounce('preprocess', autoSavePreprocess);
   });
-  dom.ppAutoLang.addEventListener('change', autoSavePreprocess);
+  dom.ppAutoLang.addEventListener('change', function() {
+    debounce('preprocess', autoSavePreprocess);
+  });
 
   dom.ppNoiseGateThreshold.addEventListener('input', function() {
     dom.ppNoiseGateThresholdVal.textContent = parseInt(dom.ppNoiseGateThreshold.value) + ' dB';
   });
-  dom.ppNoiseGateThreshold.addEventListener('change', autoSavePreprocess);
+  dom.ppNoiseGateThreshold.addEventListener('change', function() {
+    debounce('preprocess', autoSavePreprocess);
+  });
 
   dom.ppNormalizeTarget.addEventListener('input', function() {
     dom.ppNormalizeTargetVal.textContent = parseInt(dom.ppNormalizeTarget.value) + ' dB';
   });
-  dom.ppNormalizeTarget.addEventListener('change', autoSavePreprocess);
+  dom.ppNormalizeTarget.addEventListener('change', function() {
+    debounce('preprocess', autoSavePreprocess);
+  });
 
   dom.ppHighpassCutoff.addEventListener('input', function() {
     dom.ppHighpassCutoffVal.textContent = parseInt(dom.ppHighpassCutoff.value) + ' Hz';
   });
-  dom.ppHighpassCutoff.addEventListener('change', autoSavePreprocess);
+  dom.ppHighpassCutoff.addEventListener('change', function() {
+    debounce('preprocess', autoSavePreprocess);
+  });
 
   // Log
   dom.logAutoScroll.addEventListener('change', function() {
@@ -1003,6 +1116,27 @@ function initEvents() {
   dom.clearLog.addEventListener('click', function() {
     dom.logContainer.innerHTML = '';
   });
+
+  // Log level filters
+  if (dom.logFilters) {
+    var filterCheckboxes = dom.logFilters.querySelectorAll('input[type="checkbox"]');
+    // Init checkbox state from saved preferences
+    filterCheckboxes.forEach(function(cb) {
+      cb.checked = adminState.logFilterLevels[cb.value] !== false;
+      cb.addEventListener('change', function() {
+        adminState.logFilterLevels[cb.value] = cb.checked;
+        localStorage.setItem('logFilterLevels', JSON.stringify(adminState.logFilterLevels));
+        // Apply filter to existing entries
+        var entries = dom.logContainer.querySelectorAll('.log-entry');
+        entries.forEach(function(el) {
+          var level = el.getAttribute('data-level');
+          if (level === cb.value) {
+            el.classList.toggle('log-entry--filtered', !cb.checked);
+          }
+        });
+      });
+    });
+  }
 
   // Confirm dialog
   dom.confirmOk.addEventListener('click', function() {

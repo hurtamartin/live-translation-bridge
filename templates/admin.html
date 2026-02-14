@@ -7,6 +7,7 @@
   <link rel="icon" type="image/svg+xml" href="/static/assets/favicon.svg">
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="stylesheet" href="/static/admin.css">
+  <meta name="ws-token" content="{{ ws_token }}">
 </head>
 <body>
   <header class="admin-header">
@@ -303,6 +304,12 @@
           </label>
           <button class="admin-btn admin-btn--small" id="clearLog" data-i18n="clearLog">Vymazat</button>
         </div>
+      </div>
+      <div class="log-filters" id="logFilters">
+        <label class="log-filter"><input type="checkbox" value="DEBUG" checked> DEBUG</label>
+        <label class="log-filter"><input type="checkbox" value="INFO" checked> INFO</label>
+        <label class="log-filter"><input type="checkbox" value="WARNING" checked> WARNING</label>
+        <label class="log-filter"><input type="checkbox" value="ERROR" checked> ERROR</label>
       </div>
       <div class="log-container" id="logContainer"></div>
     </section>

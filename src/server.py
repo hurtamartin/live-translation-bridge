@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import os
 import queue
 import threading
 import time
@@ -10,13 +11,42 @@ import secrets
 import sounddevice as sd
 import torch
 from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from src.logging_handler import logger, log_handler
-from src.config import runtime_config, save_config, DEFAULT_CONFIG, CONFIG_RANGES
+from src.config import runtime_config, save_config, DEFAULT_CONFIG, CONFIG_RANGES, SUPPORTED_LANGUAGES
+
+# --- Simple in-memory rate limiter ---
+_rate_limit_store: dict[str, list[float]] = {}
+_rate_limit_lock = threading.Lock()
+RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "10"))  # requests per window
+RATE_LIMIT_WINDOW = 1.0  # seconds
+
+
+def _check_rate_limit(client_ip: str) -> bool:
+    """Return True if request is allowed, False if rate-limited."""
+    now = time.time()
+    with _rate_limit_lock:
+        timestamps = _rate_limit_store.get(client_ip, [])
+        # Remove expired entries
+        timestamps = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
+        if len(timestamps) >= RATE_LIMIT_MAX:
+            _rate_limit_store[client_ip] = timestamps
+            return False
+        timestamps.append(now)
+        _rate_limit_store[client_ip] = timestamps
+        return True
+
+
+def rate_limit(request: Request):
+    """FastAPI dependency for rate limiting admin API endpoints."""
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests")
 from src.translation.engine import MODEL_NAME, translate_audio
 from src.audio.capture import (
     get_audio_devices, restart_audio_stream, compute_audio_level,
@@ -26,13 +56,28 @@ import src.state as state
 
 # --- WEB SERVER ---
 app = FastAPI()
+
+# --- CORS ---
+cors_origins = os.environ.get("CORS_ORIGINS", "").strip()
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in cors_origins.split(",")],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # --- ADMIN AUTH ---
 security = HTTPBasic()
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "adminCB"
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
+
+if ADMIN_USERNAME == "admin" and ADMIN_PASSWORD == "admin":
+    logger.warning("Using default admin credentials — set ADMIN_USERNAME and ADMIN_PASSWORD env vars for production")
 
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
@@ -53,14 +98,24 @@ async def get(request: Request):
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page(request: Request, _user: str = Depends(verify_admin)):
-    return templates.TemplateResponse("admin.html", {"request": request})
+async def admin_page(request: Request, credentials: HTTPBasicCredentials = Depends(security)):
+    # Verify credentials (reuse same logic as verify_admin)
+    if not (secrets.compare_digest(credentials.username, ADMIN_USERNAME) and
+            secrets.compare_digest(credentials.password, ADMIN_PASSWORD)):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    # Generate token for authenticated WebSocket connections
+    ws_token = base64.b64encode(f"{credentials.username}:{credentials.password}".encode()).decode()
+    return templates.TemplateResponse("admin.html", {"request": request, "ws_token": ws_token})
 
 
 # --- API ENDPOINTS ---
 
 @app.get("/api/status")
-async def api_status(_user: str = Depends(verify_admin)):
+async def api_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state.audio_stream_lock:
         if state.audio_stream is not None and state.audio_stream.active:
             dev_idx = runtime_config["audio_device_index"]
@@ -103,7 +158,7 @@ async def api_status(_user: str = Depends(verify_admin)):
 
 
 @app.get("/api/devices")
-async def api_devices(_user: str = Depends(verify_admin)):
+async def api_devices(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
         devices = get_audio_devices()
         return JSONResponse({
@@ -117,7 +172,7 @@ async def api_devices(_user: str = Depends(verify_admin)):
 
 
 @app.post("/api/devices/select")
-async def api_devices_select(request: Request, _user: str = Depends(verify_admin)):
+async def api_devices_select(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
         body = await request.json()
         device_index = body.get("device_index")
@@ -144,50 +199,61 @@ async def api_devices_select(request: Request, _user: str = Depends(verify_admin
 
 
 @app.get("/api/config")
-async def api_config_get(_user: str = Depends(verify_admin)):
+async def api_config_get(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     return JSONResponse(dict(runtime_config))
 
 
-@app.post("/api/config")
-async def api_config_post(request: Request, _user: str = Depends(verify_admin)):
-    try:
-        body = await request.json()
-        errors = {}
+def _validate_config_values(body: dict) -> tuple[dict, dict]:
+    """Validate config key/value pairs. Returns (validated, errors) dicts."""
+    validated = {}
+    errors = {}
 
-        for key, value in body.items():
-            if key not in runtime_config:
-                errors[key] = f"Unknown config key: {key}"
+    for key, value in body.items():
+        if key not in DEFAULT_CONFIG:
+            errors[key] = f"Unknown config key: {key}"
+            continue
+
+        expected_type = type(DEFAULT_CONFIG[key])
+        if DEFAULT_CONFIG[key] is None:
+            if value is not None and not isinstance(value, int):
+                errors[key] = f"Expected int or null for {key}"
+                continue
+        elif expected_type == bool:
+            if not isinstance(value, bool):
+                errors[key] = f"Expected bool for {key}"
+                continue
+        elif expected_type == float:
+            if not isinstance(value, (int, float)):
+                errors[key] = f"Expected number for {key}"
+                continue
+            value = float(value)
+        elif expected_type == int:
+            if not isinstance(value, (int,)) or isinstance(value, bool):
+                errors[key] = f"Expected int for {key}"
+                continue
+        elif expected_type == str:
+            if not isinstance(value, str):
+                errors[key] = f"Expected string for {key}"
                 continue
 
-            expected_type = type(DEFAULT_CONFIG[key])
-            if DEFAULT_CONFIG[key] is None:
-                if value is not None and not isinstance(value, int):
-                    errors[key] = f"Expected int or null for {key}"
-                    continue
-            elif expected_type == bool:
-                if not isinstance(value, bool):
-                    errors[key] = f"Expected bool for {key}"
-                    continue
-            elif expected_type == float:
-                if not isinstance(value, (int, float)):
-                    errors[key] = f"Expected number for {key}"
-                    continue
-                value = float(value)
-            elif expected_type == int:
-                if not isinstance(value, (int,)) or isinstance(value, bool):
-                    errors[key] = f"Expected int for {key}"
-                    continue
-            elif expected_type == str:
-                if not isinstance(value, str):
-                    errors[key] = f"Expected string for {key}"
-                    continue
+        if key in CONFIG_RANGES:
+            min_val, max_val = CONFIG_RANGES[key]
+            if value < min_val or value > max_val:
+                errors[key] = f"{key} must be between {min_val} and {max_val}"
+                continue
 
-            if key in CONFIG_RANGES:
-                min_val, max_val = CONFIG_RANGES[key]
-                if value < min_val or value > max_val:
-                    errors[key] = f"{key} must be between {min_val} and {max_val}"
-                    continue
+        validated[key] = value
 
+    return validated, errors
+
+
+@app.post("/api/config")
+async def api_config_post(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
+    try:
+        body = await request.json()
+        validated, errors = _validate_config_values(body)
+
+        for key, value in validated.items():
             runtime_config[key] = value
 
         if errors:
@@ -202,22 +268,27 @@ async def api_config_post(request: Request, _user: str = Depends(verify_admin)):
 
 
 @app.get("/api/config/export")
-async def api_config_export(_user: str = Depends(verify_admin)):
+async def api_config_export(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     return JSONResponse(dict(runtime_config))
 
 
 @app.post("/api/config/import")
-async def api_config_import(request: Request, _user: str = Depends(verify_admin)):
+async def api_config_import(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
         body = await request.json()
-        imported = 0
-        for key, value in body.items():
-            if key in DEFAULT_CONFIG:
-                runtime_config[key] = value
-                imported += 1
-        save_config()
-        logger.info(f"Config imported: {imported} keys")
-        return JSONResponse({"ok": True, "imported": imported, "config": dict(runtime_config)})
+        validated, errors = _validate_config_values(body)
+
+        for key, value in validated.items():
+            runtime_config[key] = value
+
+        if validated:
+            save_config()
+
+        logger.info(f"Config imported: {len(validated)} keys" + (f", {len(errors)} rejected" if errors else ""))
+        result = {"ok": True, "imported": len(validated), "config": dict(runtime_config)}
+        if errors:
+            result["errors"] = errors
+        return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
@@ -226,22 +297,56 @@ async def api_config_import(request: Request, _user: str = Depends(verify_admin)
 async def health_check():
     with state.audio_stream_lock:
         audio_ok = state.audio_stream is not None and state.audio_stream.active
+    model_ok = state.processor is not None and state.model is not None
+    thread_ok = state.processing_thread is not None and state.processing_thread.is_alive()
+
+    gpu_ok = True
+    if state.device and state.device.type == "cuda":
+        try:
+            torch.cuda.mem_get_info(0)
+        except Exception:
+            gpu_ok = False
+
+    if model_ok and thread_ok and audio_ok and gpu_ok:
+        status = "healthy"
+    elif model_ok and thread_ok:
+        status = "degraded"
+    else:
+        status = "unhealthy"
+
     return JSONResponse({
-        "status": "healthy" if audio_ok else "degraded",
+        "status": status,
         "uptime": int(time.time() - state.start_time),
         "clients": state.manager.client_count(),
         "audio_stream": "running" if audio_ok else "stopped",
-        "model": "loaded",
+        "model": "loaded" if model_ok else "not_loaded",
+        "processing_thread": "running" if thread_ok else "stopped",
+        "gpu": "ok" if gpu_ok else "error",
     })
 
 
+@app.get("/api/qr.svg")
+async def qr_code_svg(request: Request):
+    """Generate QR code SVG dynamically from the request URL."""
+    import qrcode
+    import qrcode.image.svg
+    import io
+
+    base_url = str(request.base_url).rstrip("/")
+    img = qrcode.make(base_url, image_factory=qrcode.image.svg.SvgPathImage)
+    buf = io.BytesIO()
+    img.save(buf)
+    return Response(content=buf.getvalue(), media_type="image/svg+xml",
+                    headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/api/sessions")
-async def api_sessions(_user: str = Depends(verify_admin)):
+async def api_sessions(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     return JSONResponse(state.manager.get_sessions_info())
 
 
 @app.get("/api/metrics")
-async def api_metrics(_user: str = Depends(verify_admin)):
+async def api_metrics(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state._perf_lock:
         enc = list(state._perf_metrics["encoder_ms"])
         dec = list(state._perf_metrics["decoder_ms"])
@@ -261,13 +366,13 @@ async def api_metrics(_user: str = Depends(verify_admin)):
 
 
 @app.get("/api/translations")
-async def api_translations(_user: str = Depends(verify_admin)):
+async def api_translations(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state._translation_history_lock:
         return JSONResponse(list(state._translation_history))
 
 
 @app.get("/api/audio-history")
-async def api_audio_history(_user: str = Depends(verify_admin)):
+async def api_audio_history(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state._audio_level_lock:
         return JSONResponse(list(state._audio_history))
 
@@ -275,10 +380,27 @@ async def api_audio_history(_user: str = Depends(verify_admin)):
 # --- WebSocket endpoints ---
 
 def _verify_ws_auth(websocket: WebSocket) -> bool:
+    """Verify admin credentials for WebSocket connections.
+
+    Checks Authorization header first (works for non-browser clients),
+    then falls back to ?token= query parameter (Base64-encoded user:pass)
+    because browser WebSocket API does not support custom headers.
+    """
+    # Try Authorization header first
     auth_header = websocket.headers.get("authorization", "")
     if auth_header.startswith("Basic "):
         try:
             decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            username, password = decoded.split(":", 1)
+            if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
+                return True
+        except Exception:
+            pass
+    # Fallback: ?token=base64(user:pass) for browser WebSocket
+    token = websocket.query_params.get("token", "")
+    if token:
+        try:
+            decoded = base64.b64decode(token).decode("utf-8")
             username, password = decoded.split(":", 1)
             if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
                 return True
@@ -354,15 +476,32 @@ async def api_logs_ws(websocket: WebSocket):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     session_id = await state.manager.connect(websocket)
+    if session_id is None:
+        await websocket.close(code=1013, reason="Too many clients")
+        logger.warning("Client rejected: connection limit reached")
+        return
     logger.info(f"Client connected: {session_id[:8]}")
     try:
         while True:
             msg = await websocket.receive_text()
-            data = json.loads(msg)
-            if data.get("type") == "set_lang" and "lang" in data:
-                state.manager.set_language(session_id, data["lang"])
-                logger.info(f"Session {session_id[:8]} language -> {data['lang']}")
+            try:
+                data = json.loads(msg)
+            except (json.JSONDecodeError, ValueError):
+                logger.warning(f"Session {session_id[:8]} sent invalid JSON")
+                continue
+            msg_type = data.get("type")
+            if msg_type == "ping":
+                await websocket.send_text('{"type":"pong"}')
+            elif msg_type == "set_lang" and "lang" in data:
+                lang = data["lang"]
+                if not isinstance(lang, str) or lang not in SUPPORTED_LANGUAGES:
+                    logger.warning(f"Session {session_id[:8]} invalid language: {str(lang)[:20]}")
+                    continue
+                state.manager.set_language(session_id, lang)
+                logger.info(f"Session {session_id[:8]} language -> {lang}")
     except WebSocketDisconnect:
+        pass
+    finally:
         state.manager.disconnect(session_id)
         logger.info(f"Client disconnected: {session_id[:8]}")
 
@@ -385,6 +524,9 @@ def submit_translation(audio_np, target_langs, loop):
         logger.error(f"Translation Error: {e}")
 
 
+INFERENCE_TIMEOUT = 30  # seconds — log critical if inference exceeds this
+
+
 def processing_loop(loop):
     MAX_BUFFER_SAMPLES = 48000 * 30
     audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
@@ -394,19 +536,40 @@ def processing_loop(loop):
     silence_start = None
     is_speaking = False
     VAD_MIN_SAMPLES = 512
+    last_future = None
+    last_future_time = 0
+
+    _level_update_interval = 0.1  # update audio level at most 10x/s
+    _last_level_update = 0.0
+    _pending_level = -60.0
+    _pending_peak = -60.0
 
     while not state.stop_event.is_set():
         try:
             chunk = state.audio_queue.get(timeout=0.1)
             chunk_np = np.concatenate(chunk).flatten()
 
-            chunk_np = resample_audio(chunk_np, state.resampler)
+            # Grab resampler reference under lock (restart_audio_stream writes it)
+            with state.audio_stream_lock:
+                current_resampler = state.resampler
+            chunk_np = resample_audio(chunk_np, current_resampler)
 
             level = compute_audio_level(chunk_np)
-            with state._audio_level_lock:
-                state._audio_level_db = level
-                if level > state._audio_level_peak:
-                    state._audio_level_peak = level
+            # Track max since last flush (lock-free local vars)
+            if level > _pending_level:
+                _pending_level = level
+            if level > _pending_peak:
+                _pending_peak = level
+
+            now_lvl = time.time()
+            if now_lvl - _last_level_update >= _level_update_interval:
+                with state._audio_level_lock:
+                    state._audio_level_db = _pending_level
+                    if _pending_peak > state._audio_level_peak:
+                        state._audio_level_peak = _pending_peak
+                _pending_level = -60.0
+                _pending_peak = -60.0
+                _last_level_update = now_lvl
 
             n = chunk_np.shape[0]
             if buffer_pos + n <= MAX_BUFFER_SAMPLES:
@@ -455,10 +618,21 @@ def processing_loop(loop):
 
                 target_langs = state.manager.get_unique_languages()
                 if target_langs:
-                    if state.inference_executor._work_queue.qsize() >= 1:
+                    # Check for stuck inference
+                    if last_future is not None and not last_future.done():
+                        elapsed = time.time() - last_future_time
+                        if elapsed > INFERENCE_TIMEOUT:
+                            logger.critical(f"Inference stuck for {elapsed:.0f}s — skipping new submission")
+                            last_future.cancel()
+                            last_future = None
+                            # Skip this chunk
+                        else:
+                            logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference busy ({elapsed:.0f}s)")
+                    elif state.inference_executor._work_queue.qsize() >= 1:
                         logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference queue busy")
                     else:
-                        state.inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
+                        last_future = state.inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
+                        last_future_time = time.time()
 
                 samples_ctx = int(sr * ctx_overlap)
                 if full_audio.shape[0] > samples_ctx:
@@ -483,8 +657,11 @@ def processing_loop(loop):
 
 async def broadcaster():
     """Send translated texts to clients per their language."""
-    while True:
-        results = await state.translation_queue.get()
+    while not state.stop_event.is_set():
+        try:
+            results = await asyncio.wait_for(state.translation_queue.get(), timeout=1.0)
+        except asyncio.TimeoutError:
+            continue
         tasks = []
         for lang, text in results.items():
             logger.info(f"[{lang}] {text}")
@@ -494,9 +671,56 @@ async def broadcaster():
 
 async def audio_history_ticker():
     """Record audio level once per second for history graph."""
-    while True:
+    while not state.stop_event.is_set():
         await asyncio.sleep(1)
         state._update_audio_history()
+
+
+def audio_watchdog():
+    """Monitor audio device health and attempt reconnection on failure.
+
+    Runs in its own thread. Uses state.audio_device_error (threading.Event)
+    signaled by audio callbacks when device errors occur.
+    """
+    RECONNECT_DELAYS = [1, 2, 4, 8, 16, 30]  # exponential backoff, max 30s
+
+    while not state.stop_event.is_set():
+        # Wait for error signal or periodic check (5s)
+        signaled = state.audio_device_error.wait(timeout=5.0)
+
+        if state.stop_event.is_set():
+            break
+
+        # Check if stream is dead (either error signaled or stream inactive)
+        needs_restart = signaled
+        if not needs_restart:
+            with state.audio_stream_lock:
+                if state.audio_stream is not None and not state.audio_stream.active:
+                    needs_restart = True
+
+        if not needs_restart:
+            continue
+
+        state.audio_device_error.clear()
+        logger.warning("Audio device error detected, attempting reconnection...")
+
+        for attempt, delay in enumerate(RECONNECT_DELAYS):
+            if state.stop_event.is_set():
+                return
+            try:
+                device_idx = runtime_config["audio_device_index"]
+                restart_audio_stream(device_idx, runtime_config["audio_channel"], state)
+                logger.info(f"Audio device reconnected (attempt {attempt + 1})")
+                break
+            except Exception as e:
+                logger.warning(f"Audio reconnect attempt {attempt + 1} failed: {e}")
+                # Wait before next attempt, but check stop_event
+                for _ in range(int(delay * 10)):
+                    if state.stop_event.is_set():
+                        return
+                    time.sleep(0.1)
+        else:
+            logger.error("Audio reconnection failed after all attempts. Waiting for next error signal.")
 
 
 def start_server():
@@ -504,15 +728,65 @@ def start_server():
     import uvicorn
 
     device_idx = runtime_config["audio_device_index"]
-    restart_audio_stream(device_idx, runtime_config["audio_channel"], state)
+    try:
+        restart_audio_stream(device_idx, runtime_config["audio_channel"], state)
+    except Exception as e:
+        logger.error(f"Initial audio stream failed: {e} — will retry via watchdog")
 
     @app.on_event("startup")
     async def startup_event():
         loop = asyncio.get_running_loop()
         asyncio.create_task(broadcaster())
         asyncio.create_task(audio_history_ticker())
-        processing_thread = threading.Thread(target=processing_loop, args=(loop,), daemon=True)
-        processing_thread.start()
+        # Audio watchdog runs in its own thread (uses blocking wait/sleep)
+        watchdog_thread = threading.Thread(target=audio_watchdog, daemon=True)
+        watchdog_thread.start()
+        # Processing thread — NOT daemon, coordinated shutdown via stop_event
+        state.processing_thread = threading.Thread(target=processing_loop, args=(loop,))
+        state.processing_thread.start()
 
-    logger.info("Starting Web Server on port 8888...")
-    uvicorn.run(app, host="0.0.0.0", port=8888, log_level="info")
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        logger.info("Shutting down...")
+        # 1. Signal all threads to stop
+        state.stop_event.set()
+        state.audio_device_error.set()  # unblock watchdog
+
+        # 2. Wait for processing thread to finish current work
+        if state.processing_thread and state.processing_thread.is_alive():
+            state.processing_thread.join(timeout=10)
+            if state.processing_thread.is_alive():
+                logger.warning("Processing thread did not stop in time")
+
+        # 3. Shutdown inference executor
+        state.inference_executor.shutdown(wait=False)
+
+        # 4. Stop audio stream
+        with state.audio_stream_lock:
+            if state.audio_stream is not None:
+                try:
+                    state.audio_stream.stop()
+                except Exception:
+                    pass
+                try:
+                    state.audio_stream.close()
+                except Exception:
+                    pass
+                state.audio_stream = None
+
+        # 5. Save config
+        save_config()
+
+        # 6. Release GPU memory
+        if state.device and state.device.type == "cuda":
+            try:
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        logger.info("Shutdown complete.")
+
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8888"))
+    logger.info(f"Starting Web Server on {host}:{port}...")
+    uvicorn.run(app, host=host, port=port, log_level="info")

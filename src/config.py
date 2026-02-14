@@ -24,6 +24,8 @@ DEFAULT_CONFIG = {
 
 CONFIG_FILE = Path(__file__).parent.parent / "config.json"
 
+SUPPORTED_LANGUAGES = {"ces", "eng", "spa", "ukr", "deu", "pol"}
+
 def load_config() -> dict:
     """Load config from JSON file, falling back to defaults."""
     config = dict(DEFAULT_CONFIG)
@@ -47,8 +49,6 @@ def save_config():
     except Exception as e:
         logger.error(f"Failed to save config: {e}")
 
-runtime_config = load_config()
-
 # Validation ranges for config values
 CONFIG_RANGES = {
     "silence_duration": (0.3, 3.0),
@@ -61,3 +61,31 @@ CONFIG_RANGES = {
     "preprocess_normalize_target": (-20.0, 0.0),
     "preprocess_highpass_cutoff": (20, 300),
 }
+
+
+def _validate_loaded_config(config: dict) -> dict:
+    """Validate config values against CONFIG_RANGES, reset out-of-range to defaults."""
+    for key, (min_val, max_val) in CONFIG_RANGES.items():
+        if key in config and config[key] is not None:
+            try:
+                val = config[key]
+                if val < min_val or val > max_val:
+                    logger.warning(f"Config '{key}' value {val} out of range ({min_val}-{max_val}), reset to default {DEFAULT_CONFIG[key]}")
+                    config[key] = DEFAULT_CONFIG[key]
+            except (TypeError, ValueError):
+                logger.warning(f"Config '{key}' invalid type, reset to default {DEFAULT_CONFIG[key]}")
+                config[key] = DEFAULT_CONFIG[key]
+
+    # Validate types match defaults
+    for key, value in config.items():
+        if key in DEFAULT_CONFIG and value is not None and DEFAULT_CONFIG[key] is not None:
+            expected_type = type(DEFAULT_CONFIG[key])
+            if expected_type == float and isinstance(value, int) and not isinstance(value, bool):
+                config[key] = float(value)
+            elif not isinstance(value, expected_type):
+                logger.warning(f"Config '{key}' wrong type ({type(value).__name__}), reset to default {DEFAULT_CONFIG[key]}")
+                config[key] = DEFAULT_CONFIG[key]
+    return config
+
+
+runtime_config = _validate_loaded_config(load_config())

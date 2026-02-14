@@ -4,30 +4,62 @@
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMP_BASE="${TMPDIR:-${TMP:-/tmp}}"
-# Remove trailing slash from TEMP_BASE if present to avoid double slashes, though usually harmless
 TEMP_BASE="${TEMP_BASE%/}"
 VENV_DIR="$TEMP_BASE/venv_preklad_kazani_AI"
-PYTHON_CMD="python3.12"
 
 echo "=== Setup Translation Environment ==="
 
-# 1. Check for Python
-if ! command -v $PYTHON_CMD &> /dev/null; then
-    echo "Error: $PYTHON_CMD could not be found."
+# 1. Find Python 3.12+
+PYTHON_CMD=""
+for cmd in python3.13 python3.12 python3; do
+    if command -v "$cmd" &> /dev/null; then
+        version=$("$cmd" -c "import sys; print(sys.version_info[:2])" 2>/dev/null)
+        major=$("$cmd" -c "import sys; print(sys.version_info[0])" 2>/dev/null)
+        minor=$("$cmd" -c "import sys; print(sys.version_info[1])" 2>/dev/null)
+        if [ "$major" -ge 3 ] && [ "$minor" -ge 12 ] 2>/dev/null; then
+            PYTHON_CMD="$cmd"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "Error: Python 3.12+ could not be found. Please install Python 3.12 or newer."
     exit 1
 fi
+echo "Using Python: $PYTHON_CMD ($($PYTHON_CMD --version))"
 
-# 2. Check/Install PortAudio (Required for sounddevice on Mac)
-if ! brew list portaudio &>/dev/null; then
-    echo "Installing portaudio via Homebrew (required for audio input)..."
-    if command -v brew &> /dev/null; then
-        brew install portaudio
+# 2. Check/Install PortAudio (required for sounddevice)
+if [[ "$(uname)" == "Darwin" ]]; then
+    # macOS
+    if ! brew list portaudio &>/dev/null 2>&1; then
+        echo "Installing portaudio via Homebrew (required for audio input)..."
+        if command -v brew &> /dev/null; then
+            brew install portaudio
+        else
+            echo "Error: Homebrew not found. Install portaudio manually: https://brew.sh"
+            exit 1
+        fi
     else
-        echo "Error: Homebrew not found. Please install 'portaudio' manually."
-        exit 1
+        echo "PortAudio is installed."
     fi
 else
-    echo "PortAudio is installed."
+    # Linux
+    if ! ldconfig -p 2>/dev/null | grep -q libportaudio; then
+        echo "Installing portaudio (required for audio input)..."
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y libportaudio2 portaudio19-dev
+        elif command -v dnf &> /dev/null; then
+            sudo dnf install -y portaudio portaudio-devel
+        elif command -v pacman &> /dev/null; then
+            sudo pacman -S --noconfirm portaudio
+        else
+            echo "Error: Could not detect package manager. Install portaudio manually."
+            exit 1
+        fi
+    else
+        echo "PortAudio is installed."
+    fi
 fi
 
 # 3. Virtual Environment Setup
@@ -36,7 +68,6 @@ if [ ! -d "$VENV_DIR" ]; then
     $PYTHON_CMD -m venv "$VENV_DIR"
 fi
 
-# Activate Venv variables
 PYTHON_EXEC="$VENV_DIR/bin/python3"
 PIP_EXEC="$VENV_DIR/bin/pip"
 
@@ -46,6 +77,6 @@ echo "Installing dependencies..."
 
 # 5. Run Application
 echo "Starting Translation Server..."
-echo "Open http://<YOUR_IP>:8888 on mobile devices."
+echo "Open http://<YOUR_IP> on mobile devices (port configured in config.env)."
 cd "$BASE_DIR" || exit
 "$PYTHON_EXEC" "app.py"

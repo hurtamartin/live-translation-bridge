@@ -1,13 +1,17 @@
 /* Service Worker - caches static assets for offline shell */
 'use strict';
 
-const CACHE_NAME = 'live-preklad-v1';
+const CACHE_NAME = 'live-preklad-v2';
 const STATIC_ASSETS = [
   '/',
   '/static/styles.css',
   '/static/app.js',
   '/static/manifest.json',
   '/static/assets/favicon.svg',
+  // Admin assets
+  '/admin',
+  '/static/admin.css',
+  '/static/admin.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -34,8 +38,11 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        // Only cache successful responses (2xx)
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
         return response;
       })
       .catch(() => caches.match(event.request))
