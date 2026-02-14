@@ -75,21 +75,34 @@ if cors_origins:
         allow_headers=["*"],
     )
 
-from starlette.middleware.base import BaseHTTPMiddleware
+_CSP_VALUE = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self' ws: wss:; "
+    "font-src 'self'"
+)
 
 
-class CSPMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; "
-            "connect-src 'self' ws: wss:; "
-            "font-src 'self'"
-        )
-        return response
+class CSPMiddleware:
+    """Lightweight ASGI middleware — no per-request task/stream overhead."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_csp(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"content-security-policy", _CSP_VALUE.encode()))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_csp)
 
 
 app.add_middleware(CSPMiddleware)
@@ -577,14 +590,20 @@ def processing_loop(loop):
     MAX_BUFFER_SAMPLES = 48000 * 30
     audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
     buffer_pos = 0
-    vad_buffer = torch.tensor([], dtype=torch.float32)
-    vad_buffer_time = time.time()
     prev_audio = np.array([], dtype=np.float32)
     silence_start = None
     is_speaking = False
     VAD_MIN_SAMPLES = 512
     last_future = None
     last_future_time = 0
+
+    # Pre-allocated VAD buffer (numpy) with index pointer — no torch.cat per chunk
+    VAD_BUFFER_MAX = 16000  # ~1s at 16kHz, far more than needed
+    vad_np_buffer = np.zeros(VAD_BUFFER_MAX, dtype=np.float32)
+    vad_pos = 0
+    vad_buffer_time = time.time()
+    # Pre-allocated tensor for VAD inference (reused every call)
+    vad_chunk_tensor = torch.zeros(VAD_MIN_SAMPLES, dtype=torch.float32)
 
     _level_update_interval = 0.1  # update audio level at most 10x/s
     _last_level_update = 0.0
@@ -623,16 +642,26 @@ def processing_loop(loop):
                 audio_buffer[buffer_pos:buffer_pos + n] = chunk_np
                 buffer_pos += n
 
-            chunk_tensor = torch.from_numpy(chunk_np).float()
-            vad_buffer = torch.cat((vad_buffer, chunk_tensor))
+            # Append to VAD numpy buffer (no allocation)
+            vad_n = min(n, VAD_BUFFER_MAX - vad_pos)
+            if vad_n > 0:
+                vad_np_buffer[vad_pos:vad_pos + vad_n] = chunk_np[:vad_n]
+                vad_pos += vad_n
             vad_buffer_time = time.time()
             speech_detected = is_speaking
 
-            while vad_buffer.shape[0] >= VAD_MIN_SAMPLES:
-                vad_chunk = vad_buffer[:VAD_MIN_SAMPLES]
-                vad_buffer = vad_buffer[VAD_MIN_SAMPLES:]
-                confidence = state.vad_model(vad_chunk, runtime_config["sample_rate"]).item()
+            # Process VAD in 512-sample steps using pointer into pre-allocated buffer
+            vad_read_pos = 0
+            while vad_pos - vad_read_pos >= VAD_MIN_SAMPLES:
+                vad_chunk_tensor.copy_(torch.from_numpy(vad_np_buffer[vad_read_pos:vad_read_pos + VAD_MIN_SAMPLES]))
+                vad_read_pos += VAD_MIN_SAMPLES
+                confidence = state.vad_model(vad_chunk_tensor, runtime_config["sample_rate"]).item()
                 speech_detected = confidence > 0.5
+            # Shift remaining samples to front (memmove, no allocation)
+            remaining = vad_pos - vad_read_pos
+            if remaining > 0 and vad_read_pos > 0:
+                vad_np_buffer[:remaining] = vad_np_buffer[vad_read_pos:vad_read_pos + remaining]
+            vad_pos = remaining
 
             sr = runtime_config["sample_rate"]
             total_frames = buffer_pos
@@ -702,8 +731,8 @@ def processing_loop(loop):
 
         except queue.Empty:
             # Reset VAD buffer after 5s without new audio data
-            if vad_buffer.shape[0] > 0 and time.time() - vad_buffer_time > 5.0:
-                vad_buffer = torch.tensor([], dtype=torch.float32)
+            if vad_pos > 0 and time.time() - vad_buffer_time > 5.0:
+                vad_pos = 0
             continue
         except Exception as e:
             logger.error(f"Loop Error: {e}")
