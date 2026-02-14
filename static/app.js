@@ -13,7 +13,7 @@ function safeGetItem(key) {
 }
 
 function safeSetItem(key, value) {
-  try { safeSetItem(key, value); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
 }
 
 /* ========== Configuration ========== */
@@ -506,7 +506,7 @@ function addSubtitle(text) {
   meta.className = 'subtitle__meta';
 
   var timeEl = document.createElement('span');
-  timeEl.className = 'subtitle__time' + (state.showTimestamps ? ' subtitle__time--visible' : '');
+  timeEl.className = 'subtitle__time';
   timeEl.textContent = new Date().toLocaleTimeString();
   meta.appendChild(timeEl);
 
@@ -551,9 +551,7 @@ function applySettings() {
   document.documentElement.style.setProperty('--user-font-size', state.fontSize + 'px');
 
   dom.showTimestamps.checked = state.showTimestamps;
-  document.querySelectorAll('.subtitle__time').forEach(function(el) {
-    el.classList.toggle('subtitle__time--visible', state.showTimestamps);
-  });
+  dom.subtitlesContainer.classList.toggle('show-timestamps', state.showTimestamps);
 
   dom.maxSubtitles.value = state.maxSubtitles;
 
@@ -699,9 +697,7 @@ function initEventListeners() {
   dom.showTimestamps.addEventListener('change', function(e) {
     state.showTimestamps = e.target.checked;
     safeSetItem('showTimestamps', state.showTimestamps);
-    document.querySelectorAll('.subtitle__time').forEach(function(el) {
-      el.classList.toggle('subtitle__time--visible', state.showTimestamps);
-    });
+    dom.subtitlesContainer.classList.toggle('show-timestamps', state.showTimestamps);
   });
 
   dom.maxSubtitles.addEventListener('change', function(e) {

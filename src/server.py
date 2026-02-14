@@ -5,6 +5,7 @@ import os
 import queue
 import threading
 import time
+from collections import OrderedDict, deque
 
 import numpy as np
 import secrets
@@ -20,32 +21,38 @@ from fastapi.templating import Jinja2Templates
 from src.logging_handler import logger, log_handler
 from src.config import runtime_config, save_config, DEFAULT_CONFIG, CONFIG_RANGES, SUPPORTED_LANGUAGES
 
-# --- Simple in-memory rate limiter ---
-_rate_limit_store: dict[str, list[float]] = {}
+# --- Simple in-memory rate limiter (OrderedDict for O(1) eviction) ---
+_rate_limit_store: OrderedDict[str, deque] = OrderedDict()
 _rate_limit_lock = threading.Lock()
 RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "10"))  # requests per window
 RATE_LIMIT_WINDOW = 1.0  # seconds
+_RATE_LIMIT_MAX_ENTRIES = 5000
 
 
 def _check_rate_limit(client_ip: str) -> bool:
     """Return True if request is allowed, False if rate-limited."""
     now = time.time()
     with _rate_limit_lock:
-        # Cleanup stale entries when store grows too large
-        if len(_rate_limit_store) > 10000:
-            cutoff = now - RATE_LIMIT_WINDOW * 2
-            stale_keys = [k for k, v in _rate_limit_store.items() if all(t < cutoff for t in v)]
-            for k in stale_keys:
-                del _rate_limit_store[k]
+        # Evict oldest entries when store grows too large (O(1) per eviction)
+        while len(_rate_limit_store) > _RATE_LIMIT_MAX_ENTRIES:
+            _rate_limit_store.popitem(last=False)
 
-        timestamps = _rate_limit_store.get(client_ip, [])
-        # Remove expired entries
-        timestamps = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
-        if len(timestamps) >= RATE_LIMIT_MAX:
+        timestamps = _rate_limit_store.get(client_ip)
+        if timestamps is None:
+            timestamps = deque(maxlen=RATE_LIMIT_MAX + 1)
             _rate_limit_store[client_ip] = timestamps
+        else:
+            # Move to end to maintain LRU order
+            _rate_limit_store.move_to_end(client_ip)
+
+        # Remove expired entries from front (deque is chronologically ordered)
+        cutoff = now - RATE_LIMIT_WINDOW
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.popleft()
+
+        if len(timestamps) >= RATE_LIMIT_MAX:
             return False
         timestamps.append(now)
-        _rate_limit_store[client_ip] = timestamps
         return True
 
 
@@ -587,7 +594,7 @@ INFERENCE_TIMEOUT = 30  # seconds — log critical if inference exceeds this
 
 
 def processing_loop(loop):
-    MAX_BUFFER_SAMPLES = 48000 * 30
+    MAX_BUFFER_SAMPLES = state.native_sample_rate * int(runtime_config["max_chunk_duration"] + 5)
     audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
     buffer_pos = 0
     prev_audio = np.array([], dtype=np.float32)
@@ -687,7 +694,7 @@ def processing_loop(loop):
                 should_process = True
 
             if should_process and total_duration >= min_chunk:
-                full_audio = audio_buffer[:buffer_pos].copy().astype(np.float32)
+                full_audio = audio_buffer[:buffer_pos].copy()
 
                 audio_to_process = full_audio
                 if prev_audio.size > 0:

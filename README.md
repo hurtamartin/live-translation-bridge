@@ -16,6 +16,7 @@ Real-time speech translation system that captures audio from a microphone, trans
 - **PWA support** — installable on mobile devices, SW update notifications
 - **Dark/Light theme** with auto-detection
 - **GPU acceleration** — CUDA, MPS (Apple Silicon), or CPU fallback
+- **Optimized inference** — greedy decoding, all-language warmup, minimal audio buffer allocations
 - **Dynamic QR code** — auto-generated from server URL for easy mobile access
 - **Accessibility** — WCAG AA compliant (focus indicators, contrast ratios, ARIA labels, focus traps)
 - **Security** — admin auth, WebSocket auth, rate limiting, CORS, CSP headers, config validation, connection limits

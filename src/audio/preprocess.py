@@ -4,6 +4,10 @@ from scipy.signal import lfilter
 
 def preprocess_audio(audio_np: np.ndarray, config: dict) -> np.ndarray:
     """Apply enabled preprocessing steps to audio before translation."""
+    # Early return if no preprocessing is enabled — avoid unnecessary copy
+    if not (config["preprocess_highpass"] or config["preprocess_noise_gate"] or config["preprocess_normalize"]):
+        return audio_np
+
     sr = config["sample_rate"]
     audio = audio_np.copy()
 
