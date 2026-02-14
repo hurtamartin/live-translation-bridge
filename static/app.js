@@ -376,7 +376,9 @@ function changeLanguage(langCode) {
 
   // Update active state in language modal
   document.querySelectorAll('.lang-option').forEach(function(btn) {
-    btn.classList.toggle('lang-option--active', btn.dataset.lang === langCode);
+    var isActive = btn.dataset.lang === langCode;
+    btn.classList.toggle('lang-option--active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
 
   // Clear current subtitles and show "switching" state
@@ -482,6 +484,8 @@ function applySettings() {
 
 function buildLanguageOptions() {
   dom.langOptions.innerHTML = '';
+  dom.langOptions.setAttribute('role', 'listbox');
+  dom.langOptions.setAttribute('aria-label', t('selectLanguage'));
   LANGUAGES.forEach(function(lang) {
     var btn = document.createElement('button');
     btn.className = 'lang-option';
@@ -490,11 +494,26 @@ function buildLanguageOptions() {
     }
     btn.dataset.lang = lang.code;
     btn.setAttribute('tabindex', '0');
+    btn.setAttribute('role', 'option');
+    btn.setAttribute('aria-selected', lang.code === state.language ? 'true' : 'false');
+    btn.setAttribute('aria-label', lang.name + ' (' + lang.desc + ')');
 
-    btn.innerHTML =
-      '<span class="lang-option__flag">' + lang.flag + '</span>' +
-      '<span class="lang-option__name">' + lang.name + '</span>' +
-      '<span class="lang-option__desc">' + lang.desc + '</span>';
+    var flagSpan = document.createElement('span');
+    flagSpan.className = 'lang-option__flag';
+    flagSpan.setAttribute('aria-hidden', 'true');
+    flagSpan.textContent = lang.flag;
+
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'lang-option__name';
+    nameSpan.textContent = lang.name;
+
+    var descSpan = document.createElement('span');
+    descSpan.className = 'lang-option__desc';
+    descSpan.textContent = lang.desc;
+
+    btn.appendChild(flagSpan);
+    btn.appendChild(nameSpan);
+    btn.appendChild(descSpan);
 
     dom.langOptions.appendChild(btn);
   });
@@ -510,10 +529,35 @@ function openModal(overlay) {
   if (focusable) {
     requestAnimationFrame(function() { focusable.focus(); });
   }
+  // Install focus trap
+  overlay._focusTrap = function(e) {
+    if (e.key !== 'Tab') return;
+    var focusableEls = overlay.querySelectorAll('button, [tabindex="0"], input, select, a, [tabindex]:not([tabindex="-1"])');
+    if (focusableEls.length === 0) return;
+    var first = focusableEls[0];
+    var last = focusableEls[focusableEls.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  };
+  overlay.addEventListener('keydown', overlay._focusTrap);
 }
 
 function closeModal(overlay) {
   overlay.classList.remove('modal-overlay--open');
+  // Remove focus trap
+  if (overlay._focusTrap) {
+    overlay.removeEventListener('keydown', overlay._focusTrap);
+    overlay._focusTrap = null;
+  }
   if (state.previousFocus) {
     state.previousFocus.focus();
     state.previousFocus = null;
