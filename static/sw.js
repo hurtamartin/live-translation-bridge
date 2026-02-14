@@ -1,7 +1,7 @@
 /* Service Worker - caches static assets for offline shell */
 'use strict';
 
-const CACHE_NAME = 'live-preklad-v2';
+const CACHE_NAME = 'live-preklad-v3';
 const STATIC_ASSETS = [
   '/',
   '/static/styles.css',
@@ -35,10 +35,26 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  // Network-first for HTML documents (always get fresh HTML)
+  if (event.request.destination === 'document') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('/')))
+    );
+    return;
+  }
+
+  // Network with cache fallback for other assets
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Only cache successful responses (2xx)
         if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));

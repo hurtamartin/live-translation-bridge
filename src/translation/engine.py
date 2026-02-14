@@ -47,25 +47,6 @@ def warmup_model(processor, model, device, dtype, sample_rate):
     logger.info("Warm-up complete (ces, spa, eng).")
 
 
-def detect_source_language(audio_np, processor, model, device, dtype, config):
-    """Detect source language using the model. Returns language code or None."""
-    try:
-        sr = config["sample_rate"]
-        inputs = processor(audio=audio_np, sampling_rate=sr, return_tensors="pt")
-        inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
-                  for k, v in inputs.items()}
-        with torch.no_grad():
-            output = model.generate(**inputs, tgt_lang="eng",
-                                     return_dict_in_generate=True, output_scores=True)
-        src_lang = getattr(processor, '_src_lang', None)
-        if src_lang:
-            logger.info(f"Detected source language: {src_lang}")
-        return src_lang
-    except Exception as e:
-        logger.warning(f"Language detection failed: {e}")
-        return None
-
-
 def translate_audio(audio_np, target_langs, processor, model, device, dtype, config, perf_metrics, perf_lock, translation_history, translation_history_lock):
     """Translate audio to multiple languages. Encoder runs once, decoder per language."""
     processed_audio = preprocess_audio(audio_np, config)

@@ -188,6 +188,7 @@ def restart_audio_stream(device_index, channel, state):
                 )
             state.audio_stream.start()
             dev_name = "default" if device_index is None else sd.query_devices(device_index)['name']
+            state.cached_device_name = dev_name
             logger.info(f"Audio stream started: device={dev_name}, channel={channel}, native_sr={native_sr}")
         except Exception as e:
             logger.error(f"Failed to start audio stream: {e}")
