@@ -52,6 +52,18 @@ model = None
 vad_model = None
 vad_utils = None
 
+# Cached device name (updated in restart_audio_stream)
+cached_device_name = None
+
+# Inference pending counter (replaces _work_queue.qsize())
+inference_pending = 0
+inference_pending_lock = threading.Lock()
+
+# Async task references (for graceful shutdown)
+broadcaster_task = None
+audio_ticker_task = None
+watchdog_thread = None
+
 
 def _update_audio_history():
     """Called once per second to record audio level history."""

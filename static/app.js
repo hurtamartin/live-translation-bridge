@@ -6,6 +6,16 @@
  * Backend sends plain text via WebSocket, language change via {"type":"set_lang","lang":"ces"}.
  */
 
+/* ========== Safe localStorage ========== */
+
+function safeGetItem(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+
+function safeSetItem(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
+}
+
 /* ========== Configuration ========== */
 
 const LANGUAGES = [
@@ -173,11 +183,11 @@ const CONFIG = {
 
 const state = {
   ws: null,
-  language: localStorage.getItem('lang') || CONFIG.DEFAULT_LANG,
-  theme: localStorage.getItem('theme') || 'auto',
-  fontSize: parseInt(localStorage.getItem('fontSize') || CONFIG.DEFAULT_FONT_SIZE, 10),
-  showTimestamps: localStorage.getItem('showTimestamps') === 'true',
-  maxSubtitles: parseInt(localStorage.getItem('maxSubtitles') || CONFIG.DEFAULT_MAX_SUBTITLES, 10),
+  language: safeGetItem('lang') || CONFIG.DEFAULT_LANG,
+  theme: safeGetItem('theme') || 'auto',
+  fontSize: parseInt(safeGetItem('fontSize') || CONFIG.DEFAULT_FONT_SIZE, 10),
+  showTimestamps: safeGetItem('showTimestamps') === 'true',
+  maxSubtitles: parseInt(safeGetItem('maxSubtitles') || CONFIG.DEFAULT_MAX_SUBTITLES, 10),
   reconnectDelay: CONFIG.RECONNECT_BASE,
   reconnectTimer: null,
   reconnectCountdownTimer: null,
@@ -274,7 +284,7 @@ function applyTheme() {
 function toggleTheme() {
   var current = document.documentElement.getAttribute('data-theme');
   state.theme = current === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('theme', state.theme);
+  safeSetItem('theme', state.theme);
   applyTheme();
 }
 
@@ -413,8 +423,9 @@ function scheduleReconnect() {
 /* ========== Language ========== */
 
 function changeLanguage(langCode) {
+  if (state.switchingLanguage) return;
   state.language = langCode;
-  localStorage.setItem('lang', langCode);
+  safeSetItem('lang', langCode);
 
   var info = getLangInfo(langCode);
   dom.fabLabel.textContent = info.label;
@@ -495,7 +506,7 @@ function addSubtitle(text) {
   meta.className = 'subtitle__meta';
 
   var timeEl = document.createElement('span');
-  timeEl.className = 'subtitle__time' + (state.showTimestamps ? ' subtitle__time--visible' : '');
+  timeEl.className = 'subtitle__time';
   timeEl.textContent = new Date().toLocaleTimeString();
   meta.appendChild(timeEl);
 
@@ -540,9 +551,7 @@ function applySettings() {
   document.documentElement.style.setProperty('--user-font-size', state.fontSize + 'px');
 
   dom.showTimestamps.checked = state.showTimestamps;
-  document.querySelectorAll('.subtitle__time').forEach(function(el) {
-    el.classList.toggle('subtitle__time--visible', state.showTimestamps);
-  });
+  dom.subtitlesContainer.classList.toggle('show-timestamps', state.showTimestamps);
 
   dom.maxSubtitles.value = state.maxSubtitles;
 
@@ -680,22 +689,20 @@ function initEventListeners() {
 
   dom.fontSizeSlider.addEventListener('input', function(e) {
     state.fontSize = parseInt(e.target.value, 10);
-    localStorage.setItem('fontSize', state.fontSize);
+    safeSetItem('fontSize', state.fontSize);
     dom.fontSizeValue.textContent = state.fontSize + 'px';
     document.documentElement.style.setProperty('--user-font-size', state.fontSize + 'px');
   });
 
   dom.showTimestamps.addEventListener('change', function(e) {
     state.showTimestamps = e.target.checked;
-    localStorage.setItem('showTimestamps', state.showTimestamps);
-    document.querySelectorAll('.subtitle__time').forEach(function(el) {
-      el.classList.toggle('subtitle__time--visible', state.showTimestamps);
-    });
+    safeSetItem('showTimestamps', state.showTimestamps);
+    dom.subtitlesContainer.classList.toggle('show-timestamps', state.showTimestamps);
   });
 
   dom.maxSubtitles.addEventListener('change', function(e) {
     state.maxSubtitles = parseInt(e.target.value, 10);
-    localStorage.setItem('maxSubtitles', state.maxSubtitles);
+    safeSetItem('maxSubtitles', state.maxSubtitles);
     trimSubtitles();
   });
 
@@ -772,8 +779,12 @@ function releaseWakeLock() {
 
 function setupAutoHide() {
   var HIDE_DELAY = 5000;
+  var lastShowTime = 0;
 
   function showUI() {
+    var now = Date.now();
+    if (now - lastShowTime < 100) return;
+    lastShowTime = now;
     dom.header.classList.remove('header--hidden');
     dom.langFab.classList.remove('fab--hidden');
     clearTimeout(state.autoHideTimer);
@@ -807,10 +818,14 @@ function registerServiceWorker() {
         if (!newWorker) return;
         newWorker.addEventListener('statechange', function() {
           if (newWorker.state === 'activated' && navigator.serviceWorker.controller) {
+            // Deduplicate: only one update banner at a time
+            if (document.querySelector('.update-banner')) return;
             // New version available — show update banner
             var banner = document.createElement('div');
             banner.className = 'update-banner';
-            banner.innerHTML = '<span>' + t('updateAvailable') + '</span>';
+            var span = document.createElement('span');
+            span.textContent = t('updateAvailable');
+            banner.appendChild(span);
             var btn = document.createElement('button');
             btn.className = 'update-banner__btn';
             btn.textContent = t('updateReload');
@@ -833,12 +848,26 @@ function setupOfflineDetection() {
   var banner = document.createElement('div');
   banner.id = 'offlineBanner';
   banner.className = 'offline-banner';
-  banner.textContent = t('offline');
   banner.style.display = 'none';
   document.body.appendChild(banner);
 
+  function updateBannerContent() {
+    banner.textContent = '';
+    var textSpan = document.createElement('span');
+    textSpan.textContent = t('offline');
+    banner.appendChild(textSpan);
+    var dismissBtn = document.createElement('button');
+    dismissBtn.className = 'offline-banner__dismiss';
+    dismissBtn.textContent = '\u00D7';
+    dismissBtn.setAttribute('aria-label', t('close'));
+    dismissBtn.addEventListener('click', function() {
+      banner.style.display = 'none';
+    });
+    banner.appendChild(dismissBtn);
+  }
+
   window.addEventListener('offline', function() {
-    banner.textContent = t('offline');
+    updateBannerContent();
     banner.style.display = '';
   });
   window.addEventListener('online', function() {
@@ -846,6 +875,7 @@ function setupOfflineDetection() {
   });
   // Show immediately if already offline
   if (!navigator.onLine) {
+    updateBannerContent();
     banner.style.display = '';
   }
 }
@@ -862,6 +892,14 @@ function init() {
   setupOfflineDetection();
   registerServiceWorker();
   connect();
+
+  // QR image fallback (moved from inline onerror for CSP compliance)
+  var qrImg = document.getElementById('qrImage');
+  if (qrImg) {
+    qrImg.addEventListener('error', function() {
+      this.src = '/static/assets/qr-placeholder.svg';
+    }, { once: true });
+  }
 }
 
 if (document.readyState === 'loading') {

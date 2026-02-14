@@ -251,6 +251,11 @@ body {
   display: inline;
 }
 
+/* Container-level toggle: when .show-timestamps is on parent, show all times */
+.show-timestamps .subtitle__time {
+  display: inline;
+}
+
 /* === FAB (Language selector) === */
 .fab {
   position: fixed;

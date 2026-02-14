@@ -12,14 +12,14 @@ Real-time speech translation system that captures audio from a microphone, trans
 - **Audio preprocessing** — noise gate, normalization, high-pass filter
 - **Admin panel** (`/admin`) — device selection, parameter tuning, VU meter, real-time log with level filtering
 - **Persistent configuration** — settings saved to `config.json`, restored on restart with validation
-- **Automatic source language detection** — optional model-based detection
 - **Internationalized UI** — viewer in 6 languages, admin panel in Czech/English
 - **PWA support** — installable on mobile devices, SW update notifications
 - **Dark/Light theme** with auto-detection
 - **GPU acceleration** — CUDA, MPS (Apple Silicon), or CPU fallback
+- **Optimized inference** — greedy decoding, all-language warmup, minimal audio buffer allocations
 - **Dynamic QR code** — auto-generated from server URL for easy mobile access
 - **Accessibility** — WCAG AA compliant (focus indicators, contrast ratios, ARIA labels, focus traps)
-- **Security** — admin auth, WebSocket auth, rate limiting, CORS, config validation, connection limits
+- **Security** — admin auth, WebSocket auth, rate limiting, CORS, CSP headers, config validation, connection limits
 - **Resilience** — graceful shutdown, audio device reconnect, heartbeat ping/pong, reconnect jitter, offline detection
 - **Structured logging** — optional JSON log format for production log aggregation (ELK, Datadog)
 - **Health check** — `/health` endpoint with 3-tier status (healthy/degraded/unhealthy)
@@ -144,7 +144,6 @@ All parameters can be adjusted at runtime via the admin panel (`/admin`):
 | Normalization target | -3 dB | Target level for normalization |
 | High-pass filter | Off | Remove low-frequency rumble |
 | High-pass cutoff | 80 Hz | Cutoff frequency for high-pass filter |
-| Auto language detection | Off | Detect source language automatically |
 
 ## Supported Languages
 

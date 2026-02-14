@@ -5,6 +5,7 @@ import os
 import queue
 import threading
 import time
+from collections import OrderedDict, deque
 
 import numpy as np
 import secrets
@@ -20,25 +21,38 @@ from fastapi.templating import Jinja2Templates
 from src.logging_handler import logger, log_handler
 from src.config import runtime_config, save_config, DEFAULT_CONFIG, CONFIG_RANGES, SUPPORTED_LANGUAGES
 
-# --- Simple in-memory rate limiter ---
-_rate_limit_store: dict[str, list[float]] = {}
+# --- Simple in-memory rate limiter (OrderedDict for O(1) eviction) ---
+_rate_limit_store: OrderedDict[str, deque] = OrderedDict()
 _rate_limit_lock = threading.Lock()
 RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "10"))  # requests per window
 RATE_LIMIT_WINDOW = 1.0  # seconds
+_RATE_LIMIT_MAX_ENTRIES = 5000
 
 
 def _check_rate_limit(client_ip: str) -> bool:
     """Return True if request is allowed, False if rate-limited."""
     now = time.time()
     with _rate_limit_lock:
-        timestamps = _rate_limit_store.get(client_ip, [])
-        # Remove expired entries
-        timestamps = [t for t in timestamps if now - t < RATE_LIMIT_WINDOW]
-        if len(timestamps) >= RATE_LIMIT_MAX:
+        # Evict oldest entries when store grows too large (O(1) per eviction)
+        while len(_rate_limit_store) > _RATE_LIMIT_MAX_ENTRIES:
+            _rate_limit_store.popitem(last=False)
+
+        timestamps = _rate_limit_store.get(client_ip)
+        if timestamps is None:
+            timestamps = deque(maxlen=RATE_LIMIT_MAX + 1)
             _rate_limit_store[client_ip] = timestamps
+        else:
+            # Move to end to maintain LRU order
+            _rate_limit_store.move_to_end(client_ip)
+
+        # Remove expired entries from front (deque is chronologically ordered)
+        cutoff = now - RATE_LIMIT_WINDOW
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.popleft()
+
+        if len(timestamps) >= RATE_LIMIT_MAX:
             return False
         timestamps.append(now)
-        _rate_limit_store[client_ip] = timestamps
         return True
 
 
@@ -67,6 +81,38 @@ if cors_origins:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+_CSP_VALUE = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self' ws: wss:; "
+    "font-src 'self'"
+)
+
+
+class CSPMiddleware:
+    """Lightweight ASGI middleware — no per-request task/stream overhead."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_csp(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"content-security-policy", _CSP_VALUE.encode()))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_csp)
+
+
+app.add_middleware(CSPMiddleware)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -118,8 +164,7 @@ async def admin_page(request: Request, credentials: HTTPBasicCredentials = Depen
 async def api_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state.audio_stream_lock:
         if state.audio_stream is not None and state.audio_stream.active:
-            dev_idx = runtime_config["audio_device_index"]
-            dev_name = "default" if dev_idx is None else sd.query_devices(dev_idx)['name']
+            dev_name = state.cached_device_name or "unknown"
             audio_status = {
                 "status": "running",
                 "device_name": dev_name,
@@ -137,6 +182,9 @@ async def api_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)
     with state._audio_level_lock:
         current_audio_level = state._audio_level_db
 
+    with state.inference_pending_lock:
+        pending = state.inference_pending
+
     return JSONResponse({
         "status": "ok",
         "clients": state.manager.client_count(),
@@ -150,7 +198,7 @@ async def api_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)
             "audio_stream": audio_status,
             "inference_executor": {
                 "status": "running",
-                "pending_tasks": state.inference_executor._work_queue.qsize(),
+                "pending_tasks": pending,
             },
         },
         "config": dict(runtime_config),
@@ -325,18 +373,28 @@ async def health_check():
     })
 
 
+_qr_cache = {"url": None, "svg": None}
+
+
 @app.get("/api/qr.svg")
 async def qr_code_svg(request: Request):
-    """Generate QR code SVG dynamically from the request URL."""
+    """Generate QR code SVG dynamically from the request URL (cached)."""
     import qrcode
     import qrcode.image.svg
     import io
 
     base_url = str(request.base_url).rstrip("/")
+    if _qr_cache["url"] == base_url and _qr_cache["svg"] is not None:
+        return Response(content=_qr_cache["svg"], media_type="image/svg+xml",
+                        headers={"Cache-Control": "no-cache"})
+
     img = qrcode.make(base_url, image_factory=qrcode.image.svg.SvgPathImage)
     buf = io.BytesIO()
     img.save(buf)
-    return Response(content=buf.getvalue(), media_type="image/svg+xml",
+    svg_bytes = buf.getvalue()
+    _qr_cache["url"] = base_url
+    _qr_cache["svg"] = svg_bytes
+    return Response(content=svg_bytes, media_type="image/svg+xml",
                     headers={"Cache-Control": "no-cache"})
 
 
@@ -419,8 +477,7 @@ async def api_status_ws(websocket: WebSocket):
         while True:
             with state.audio_stream_lock:
                 if state.audio_stream is not None and state.audio_stream.active:
-                    dev_idx = runtime_config["audio_device_index"]
-                    dev_name = "default" if dev_idx is None else sd.query_devices(dev_idx)['name']
+                    dev_name = state.cached_device_name or "unknown"
                     audio_status = {"status": "running", "device_name": dev_name, "channel": runtime_config["audio_channel"]}
                 else:
                     audio_status = {"status": "stopped", "device_name": None, "channel": 0}
@@ -428,6 +485,8 @@ async def api_status_ws(websocket: WebSocket):
                 current_db = state._audio_level_db
                 current_peak = state._audio_level_peak
                 state._audio_level_peak = max(state._audio_level_peak - 0.5, state._audio_level_db)
+            with state.inference_pending_lock:
+                pending = state.inference_pending
             gpu_name = torch.cuda.get_device_name(0) if state.device.type == "cuda" else None
             payload = {
                 "clients": state.manager.client_count(),
@@ -440,7 +499,7 @@ async def api_status_ws(websocket: WebSocket):
                     "model": {"status": "running", "name": MODEL_NAME, "device": state.device.type, "gpu_name": gpu_name},
                     "vad": {"status": "running", "type": "silero"},
                     "audio_stream": audio_status,
-                    "inference_executor": {"status": "running", "pending_tasks": state.inference_executor._work_queue.qsize()},
+                    "inference_executor": {"status": "running", "pending_tasks": pending},
                 },
             }
             await websocket.send_text(json.dumps(payload))
@@ -484,6 +543,9 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             msg = await websocket.receive_text()
+            if len(msg) > 1024:
+                await websocket.close(1009, "Message too large")
+                return
             try:
                 data = json.loads(msg)
             except (json.JSONDecodeError, ValueError):
@@ -519,25 +581,36 @@ def submit_translation(audio_np, target_langs, loop):
             state._translation_history, state._translation_history_lock,
         )
         if results:
-            asyncio.run_coroutine_threadsafe(state.translation_queue.put(results), loop)
+            future = asyncio.run_coroutine_threadsafe(state.translation_queue.put(results), loop)
+            future.add_done_callback(lambda f: f.exception() and logger.error(f"Failed to queue translation: {f.exception()}"))
     except Exception as e:
         logger.error(f"Translation Error: {e}")
+    finally:
+        with state.inference_pending_lock:
+            state.inference_pending -= 1
 
 
 INFERENCE_TIMEOUT = 30  # seconds — log critical if inference exceeds this
 
 
 def processing_loop(loop):
-    MAX_BUFFER_SAMPLES = 48000 * 30
+    MAX_BUFFER_SAMPLES = state.native_sample_rate * int(runtime_config["max_chunk_duration"] + 5)
     audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
     buffer_pos = 0
-    vad_buffer = torch.tensor([], dtype=torch.float32)
     prev_audio = np.array([], dtype=np.float32)
     silence_start = None
     is_speaking = False
     VAD_MIN_SAMPLES = 512
     last_future = None
     last_future_time = 0
+
+    # Pre-allocated VAD buffer (numpy) with index pointer — no torch.cat per chunk
+    VAD_BUFFER_MAX = 16000  # ~1s at 16kHz, far more than needed
+    vad_np_buffer = np.zeros(VAD_BUFFER_MAX, dtype=np.float32)
+    vad_pos = 0
+    vad_buffer_time = time.time()
+    # Pre-allocated tensor for VAD inference (reused every call)
+    vad_chunk_tensor = torch.zeros(VAD_MIN_SAMPLES, dtype=torch.float32)
 
     _level_update_interval = 0.1  # update audio level at most 10x/s
     _last_level_update = 0.0
@@ -576,15 +649,26 @@ def processing_loop(loop):
                 audio_buffer[buffer_pos:buffer_pos + n] = chunk_np
                 buffer_pos += n
 
-            chunk_tensor = torch.from_numpy(chunk_np).float()
-            vad_buffer = torch.cat((vad_buffer, chunk_tensor))
+            # Append to VAD numpy buffer (no allocation)
+            vad_n = min(n, VAD_BUFFER_MAX - vad_pos)
+            if vad_n > 0:
+                vad_np_buffer[vad_pos:vad_pos + vad_n] = chunk_np[:vad_n]
+                vad_pos += vad_n
+            vad_buffer_time = time.time()
             speech_detected = is_speaking
 
-            while vad_buffer.shape[0] >= VAD_MIN_SAMPLES:
-                vad_chunk = vad_buffer[:VAD_MIN_SAMPLES]
-                vad_buffer = vad_buffer[VAD_MIN_SAMPLES:]
-                confidence = state.vad_model(vad_chunk, runtime_config["sample_rate"]).item()
+            # Process VAD in 512-sample steps using pointer into pre-allocated buffer
+            vad_read_pos = 0
+            while vad_pos - vad_read_pos >= VAD_MIN_SAMPLES:
+                vad_chunk_tensor.copy_(torch.from_numpy(vad_np_buffer[vad_read_pos:vad_read_pos + VAD_MIN_SAMPLES]))
+                vad_read_pos += VAD_MIN_SAMPLES
+                confidence = state.vad_model(vad_chunk_tensor, runtime_config["sample_rate"]).item()
                 speech_detected = confidence > 0.5
+            # Shift remaining samples to front (memmove, no allocation)
+            remaining = vad_pos - vad_read_pos
+            if remaining > 0 and vad_read_pos > 0:
+                vad_np_buffer[:remaining] = vad_np_buffer[vad_read_pos:vad_read_pos + remaining]
+            vad_pos = remaining
 
             sr = runtime_config["sample_rate"]
             total_frames = buffer_pos
@@ -610,7 +694,7 @@ def processing_loop(loop):
                 should_process = True
 
             if should_process and total_duration >= min_chunk:
-                full_audio = audio_buffer[:buffer_pos].copy().astype(np.float32)
+                full_audio = audio_buffer[:buffer_pos].copy()
 
                 audio_to_process = full_audio
                 if prev_audio.size > 0:
@@ -628,11 +712,14 @@ def processing_loop(loop):
                             # Skip this chunk
                         else:
                             logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference busy ({elapsed:.0f}s)")
-                    elif state.inference_executor._work_queue.qsize() >= 1:
-                        logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference queue busy")
                     else:
-                        last_future = state.inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
-                        last_future_time = time.time()
+                        with state.inference_pending_lock:
+                            if state.inference_pending >= 1:
+                                logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference queue busy")
+                            else:
+                                state.inference_pending += 1
+                                last_future = state.inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
+                                last_future_time = time.time()
 
                 samples_ctx = int(sr * ctx_overlap)
                 if full_audio.shape[0] > samples_ctx:
@@ -650,9 +737,28 @@ def processing_loop(loop):
                     buffer_pos = 0
 
         except queue.Empty:
+            # Reset VAD buffer after 5s without new audio data
+            if vad_pos > 0 and time.time() - vad_buffer_time > 5.0:
+                vad_pos = 0
             continue
         except Exception as e:
             logger.error(f"Loop Error: {e}")
+
+    # Flush remaining buffer on shutdown if enough data
+    sr = runtime_config["sample_rate"]
+    min_chunk = runtime_config["min_chunk_duration"]
+    if buffer_pos > 0 and buffer_pos / sr >= min_chunk:
+        full_audio = audio_buffer[:buffer_pos].copy().astype(np.float32)
+        if prev_audio.size > 0:
+            full_audio = np.concatenate((prev_audio, full_audio))
+        target_langs = state.manager.get_unique_languages()
+        if target_langs:
+            try:
+                with state.inference_pending_lock:
+                    state.inference_pending += 1
+                submit_translation(full_audio, target_langs, loop)
+            except Exception as e:
+                logger.error(f"Final flush translation error: {e}")
 
 
 async def broadcaster():
@@ -736,11 +842,11 @@ def start_server():
     @app.on_event("startup")
     async def startup_event():
         loop = asyncio.get_running_loop()
-        asyncio.create_task(broadcaster())
-        asyncio.create_task(audio_history_ticker())
+        state.broadcaster_task = asyncio.create_task(broadcaster())
+        state.audio_ticker_task = asyncio.create_task(audio_history_ticker())
         # Audio watchdog runs in its own thread (uses blocking wait/sleep)
-        watchdog_thread = threading.Thread(target=audio_watchdog, daemon=True)
-        watchdog_thread.start()
+        state.watchdog_thread = threading.Thread(target=audio_watchdog, daemon=False)
+        state.watchdog_thread.start()
         # Processing thread — NOT daemon, coordinated shutdown via stop_event
         state.processing_thread = threading.Thread(target=processing_loop, args=(loop,))
         state.processing_thread.start()
@@ -752,13 +858,26 @@ def start_server():
         state.stop_event.set()
         state.audio_device_error.set()  # unblock watchdog
 
-        # 2. Wait for processing thread to finish current work
+        # 2. Cancel async tasks
+        for task_ref in (state.broadcaster_task, state.audio_ticker_task):
+            if task_ref and not task_ref.done():
+                task_ref.cancel()
+                try:
+                    await asyncio.wait_for(task_ref, timeout=3)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+
+        # 3. Wait for processing thread to finish current work
         if state.processing_thread and state.processing_thread.is_alive():
             state.processing_thread.join(timeout=10)
             if state.processing_thread.is_alive():
                 logger.warning("Processing thread did not stop in time")
 
-        # 3. Shutdown inference executor
+        # 4. Wait for watchdog thread
+        if state.watchdog_thread and state.watchdog_thread.is_alive():
+            state.watchdog_thread.join(timeout=5)
+
+        # 5. Shutdown inference executor
         state.inference_executor.shutdown(wait=False)
 
         # 4. Stop audio stream

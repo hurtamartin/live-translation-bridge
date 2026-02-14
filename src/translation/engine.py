@@ -34,7 +34,8 @@ def load_model(device):
 
 def warmup_model(processor, model, device, dtype, sample_rate):
     """Run dummy inference to eliminate cold-start delay for main languages."""
-    logger.info("Warming up model (ces, spa, eng)...")
+    warmup_langs = ("ces", "eng", "spa", "ukr", "deu", "pol")
+    logger.info(f"Warming up model ({', '.join(warmup_langs)})...")
     dummy_audio = np.zeros(sample_rate * 2, dtype=np.float32)
     inputs = processor(audio=dummy_audio, sampling_rate=sample_rate, return_tensors="pt")
     inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
@@ -42,28 +43,9 @@ def warmup_model(processor, model, device, dtype, sample_rate):
     encoder_kwargs = {k: v for k, v in inputs.items() if k in ('input_features', 'attention_mask')}
     with torch.no_grad():
         encoder_out = model.get_encoder()(**encoder_kwargs)
-        for lang in ("ces", "spa", "eng"):
-            model.generate(**inputs, encoder_outputs=encoder_out, tgt_lang=lang)
-    logger.info("Warm-up complete (ces, spa, eng).")
-
-
-def detect_source_language(audio_np, processor, model, device, dtype, config):
-    """Detect source language using the model. Returns language code or None."""
-    try:
-        sr = config["sample_rate"]
-        inputs = processor(audio=audio_np, sampling_rate=sr, return_tensors="pt")
-        inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
-                  for k, v in inputs.items()}
-        with torch.no_grad():
-            output = model.generate(**inputs, tgt_lang="eng",
-                                     return_dict_in_generate=True, output_scores=True)
-        src_lang = getattr(processor, '_src_lang', None)
-        if src_lang:
-            logger.info(f"Detected source language: {src_lang}")
-        return src_lang
-    except Exception as e:
-        logger.warning(f"Language detection failed: {e}")
-        return None
+        for lang in warmup_langs:
+            model.generate(**inputs, encoder_outputs=encoder_out, tgt_lang=lang, num_beams=1, max_new_tokens=16)
+    logger.info(f"Warm-up complete ({', '.join(warmup_langs)}).")
 
 
 def translate_audio(audio_np, target_langs, processor, model, device, dtype, config, perf_metrics, perf_lock, translation_history, translation_history_lock):
@@ -93,6 +75,8 @@ def translate_audio(audio_np, target_langs, processor, model, device, dtype, con
                     **inputs,
                     encoder_outputs=encoder_out,
                     tgt_lang=lang,
+                    num_beams=1,
+                    max_new_tokens=256,
                 )
                 dec_ms = (time.time() - t_dec) * 1000
                 logger.debug(f"Decoder [{lang}]: {dec_ms:.0f}ms")

@@ -417,26 +417,28 @@ function handleStatusData(data) {
 
   if (c.model) {
     setDot(dom.dotModel, c.model.status || 'stopped');
-    var modelDevice = (c.model.device || 'unknown').toUpperCase();
+    var modelDevice = (c.model && c.model.device) ? c.model.device.toUpperCase() : 'UNKNOWN';
     var modelDetail = modelDevice;
     if (c.model.gpu_name) modelDetail += ' (' + c.model.gpu_name + ')';
-    dom.detailModel.textContent = modelDetail;
+    if (dom.detailModel) dom.detailModel.textContent = modelDetail;
   }
   if (c.vad) {
     setDot(dom.dotVad, c.vad.status || 'stopped');
-    dom.detailVad.textContent = c.vad.type || 'unknown';
+    if (dom.detailVad) dom.detailVad.textContent = (c.vad && c.vad.type) ? c.vad.type : 'unknown';
   }
   if (c.audio_stream) {
     setDot(dom.dotAudio, c.audio_stream.status || 'stopped');
-    if (c.audio_stream.status === 'running') {
-      dom.detailAudio.textContent = (c.audio_stream.device_name || '?') + ' ch' + (c.audio_stream.channel || 0);
-    } else {
-      dom.detailAudio.textContent = adminT('stopped');
+    if (dom.detailAudio) {
+      if (c.audio_stream.status === 'running') {
+        dom.detailAudio.textContent = (c.audio_stream.device_name || '?') + ' ch' + (c.audio_stream.channel != null ? c.audio_stream.channel : 0);
+      } else {
+        dom.detailAudio.textContent = adminT('stopped');
+      }
     }
   }
   if (c.inference_executor) {
     setDot(dom.dotInference, c.inference_executor.status || 'stopped');
-    dom.detailInference.textContent = adminT('pending') + ': ' + (c.inference_executor.pending_tasks || 0);
+    if (dom.detailInference) dom.detailInference.textContent = adminT('pending') + ': ' + (c.inference_executor.pending_tasks != null ? c.inference_executor.pending_tasks : 0);
   }
 
   dom.infoClients.textContent = adminT('clients') + ': ' + (data.clients || 0);
@@ -462,6 +464,9 @@ function handleStatusData(data) {
 var statusWsBackoff = 3000;
 
 function connectStatusWs() {
+  if (adminState.statusWs) {
+    try { adminState.statusWs.close(); } catch (e) { /* ignore */ }
+  }
   adminState.statusWs = new WebSocket(getAdminWsUrl('/api/status/ws'));
 
   adminState.statusWs.onopen = function() {
@@ -479,7 +484,8 @@ function connectStatusWs() {
   };
 
   adminState.statusWs.onclose = function() {
-    setTimeout(connectStatusWs, statusWsBackoff);
+    var jitter = statusWsBackoff * (0.5 * Math.random() - 0.25);
+    setTimeout(connectStatusWs, statusWsBackoff + jitter);
     statusWsBackoff = Math.min(statusWsBackoff * 2, 30000);
   };
 
@@ -998,6 +1004,9 @@ function _flushLogBatch() {
 var logWsBackoff = 3000;
 
 function connectLogWs() {
+  if (adminState.logWs) {
+    try { adminState.logWs.close(); } catch (e) { /* ignore */ }
+  }
   adminState.logWs = new WebSocket(getAdminWsUrl('/api/logs'));
 
   adminState.logWs.onopen = function() {
@@ -1019,7 +1028,8 @@ function connectLogWs() {
   };
 
   adminState.logWs.onclose = function() {
-    setTimeout(connectLogWs, logWsBackoff);
+    var jitter = logWsBackoff * (0.5 * Math.random() - 0.25);
+    setTimeout(connectLogWs, logWsBackoff + jitter);
     logWsBackoff = Math.min(logWsBackoff * 2, 30000);
   };
 
@@ -1088,26 +1098,24 @@ function initEvents() {
     debounce('preprocess', autoSavePreprocess);
   });
 
-  dom.ppNoiseGateThreshold.addEventListener('input', function() {
-    dom.ppNoiseGateThresholdVal.textContent = parseInt(dom.ppNoiseGateThreshold.value) + ' dB';
-  });
-  dom.ppNoiseGateThreshold.addEventListener('change', function() {
-    debounce('preprocess', autoSavePreprocess);
-  });
+  var _ppSliderRaf = {};
+  function throttledSliderInput(slider, display, suffix, key) {
+    slider.addEventListener('input', function() {
+      if (_ppSliderRaf[key]) return;
+      _ppSliderRaf[key] = requestAnimationFrame(function() {
+        display.textContent = parseInt(slider.value) + suffix;
+        _ppSliderRaf[key] = null;
+      });
+    });
+    slider.addEventListener('change', function() {
+      display.textContent = parseInt(slider.value) + suffix;
+      debounce('preprocess', autoSavePreprocess);
+    });
+  }
 
-  dom.ppNormalizeTarget.addEventListener('input', function() {
-    dom.ppNormalizeTargetVal.textContent = parseInt(dom.ppNormalizeTarget.value) + ' dB';
-  });
-  dom.ppNormalizeTarget.addEventListener('change', function() {
-    debounce('preprocess', autoSavePreprocess);
-  });
-
-  dom.ppHighpassCutoff.addEventListener('input', function() {
-    dom.ppHighpassCutoffVal.textContent = parseInt(dom.ppHighpassCutoff.value) + ' Hz';
-  });
-  dom.ppHighpassCutoff.addEventListener('change', function() {
-    debounce('preprocess', autoSavePreprocess);
-  });
+  throttledSliderInput(dom.ppNoiseGateThreshold, dom.ppNoiseGateThresholdVal, ' dB', 'gate');
+  throttledSliderInput(dom.ppNormalizeTarget, dom.ppNormalizeTargetVal, ' dB', 'norm');
+  throttledSliderInput(dom.ppHighpassCutoff, dom.ppHighpassCutoffVal, ' Hz', 'hp');
 
   // Log
   dom.logAutoScroll.addEventListener('change', function() {
@@ -1160,6 +1168,7 @@ function initEvents() {
 /* ========== Periodic Data Fetch ========== */
 
 function fetchPeriodicData() {
+  if (document.hidden) return;
   fetchMetrics();
   fetchSessions();
   fetchAudioHistory();
@@ -1178,7 +1187,10 @@ function init() {
   fetchTranslations();
   fetchPeriodicData();
 
-  setInterval(fetchPeriodicData, 5000);
+  var periodicIntervalId = setInterval(fetchPeriodicData, 5000);
+  window.addEventListener('beforeunload', function() {
+    clearInterval(periodicIntervalId);
+  });
 }
 
 if (document.readyState === 'loading') {
