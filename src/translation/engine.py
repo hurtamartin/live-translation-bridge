@@ -34,7 +34,7 @@ def load_model(device):
 
 def warmup_model(processor, model, device, dtype, sample_rate):
     """Run dummy inference to eliminate cold-start delay for main languages."""
-    warmup_langs = ("ces", "eng", "spa", "ukr", "deu", "pol")
+    warmup_langs = ("ces", "eng", "rus", "ukr", "deu", "spa")
     logger.info(f"Warming up model ({', '.join(warmup_langs)})...")
     dummy_audio = np.zeros(sample_rate * 2, dtype=np.float32)
     inputs = processor(audio=dummy_audio, sampling_rate=sample_rate, return_tensors="pt")
