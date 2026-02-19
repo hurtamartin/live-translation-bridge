@@ -324,6 +324,7 @@ function toggleTheme() {
   var next = current === 'dark' ? 'light' : 'dark';
   localStorage.setItem('theme', next);
   applyTheme();
+  drawAudioHistory();
 }
 
 /* ========== Toast Notifications ========== */
@@ -755,7 +756,6 @@ function applyDeviceSelection() {
   var channel = parseInt(dom.channelSelect.value);
 
   dom.applyDevice.disabled = true;
-  dom.applyDevice.textContent = adminT('loading');
 
   fetch('/api/devices/select', {
     method: 'POST',
@@ -765,23 +765,17 @@ function applyDeviceSelection() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok) {
-        dom.applyDevice.textContent = adminT('ok');
         showToast(adminT('deviceChanged'), 'success');
       } else {
-        dom.applyDevice.textContent = adminT('error');
         showToast(adminT('error') + ': ' + (data.error || adminT('unknownError')), 'error');
       }
     })
     .catch(function(err) {
       console.error('Device select error:', err);
-      dom.applyDevice.textContent = adminT('error');
       showToast(adminT('error') + ': ' + err.message, 'error');
     })
     .finally(function() {
-      setTimeout(function() {
-        dom.applyDevice.disabled = false;
-        dom.applyDevice.textContent = adminT('apply');
-      }, 1500);
+      dom.applyDevice.disabled = false;
     });
 }
 
