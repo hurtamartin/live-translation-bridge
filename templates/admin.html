@@ -153,6 +153,17 @@
           </select>
         </div>
 
+        <!-- Auto language detection -->
+        <div class="preprocess-item">
+          <div class="preprocess-item__header">
+            <label class="preprocess-toggle">
+              <input type="checkbox" id="ppAutoLang">
+              <span class="preprocess-toggle__label" data-i18n="autoLangDetect">Automaticka detekce zdrojoveho jazyka</span>
+            </label>
+            <span class="preprocess-item__hint" data-i18n="autoLangHint">Model se pokusi detekovat jazyk reci</span>
+          </div>
+        </div>
+
         <div class="admin-form__actions">
           <button class="admin-btn admin-btn--secondary" id="resetConfig" data-i18n="defaults">Vychozi</button>
           <button class="admin-btn admin-btn--secondary" id="exportConfig" data-i18n="export">Export</button>
@@ -220,17 +231,6 @@
               <input type="range" class="admin-slider" id="ppHighpassCutoff" min="20" max="300" step="10" value="80">
               <span class="admin-slider__value" id="ppHighpassCutoffVal">80 Hz</span>
             </div>
-          </div>
-        </div>
-
-        <!-- Auto language detection -->
-        <div class="preprocess-item">
-          <div class="preprocess-item__header">
-            <label class="preprocess-toggle">
-              <input type="checkbox" id="ppAutoLang">
-              <span class="preprocess-toggle__label" data-i18n="autoLangDetect">Automaticka detekce zdrojoveho jazyka</span>
-            </label>
-            <span class="preprocess-item__hint" data-i18n="autoLangHint">Model se pokusi detekovat jazyk reci</span>
           </div>
         </div>
 

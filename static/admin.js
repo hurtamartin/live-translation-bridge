@@ -506,6 +506,7 @@ function syncConfigUI(config) {
   dom.contextOverlap.value = config.context_overlap;
   dom.contextOverlapVal.textContent = config.context_overlap.toFixed(1) + 's';
   dom.defaultTargetLang.value = config.default_target_lang;
+  dom.ppAutoLang.checked = config.preprocess_auto_language;
 
   if (config.preprocess_noise_gate !== undefined) {
     syncPreprocessUI(config);
@@ -528,7 +529,6 @@ function syncPreprocessUI(config) {
   dom.ppHighpassCutoff.value = config.preprocess_highpass_cutoff;
   dom.ppHighpassCutoffVal.textContent = config.preprocess_highpass_cutoff + ' Hz';
 
-  dom.ppAutoLang.checked = config.preprocess_auto_language;
 }
 
 function togglePreprocessSettings(checkbox, settingsEl) {
@@ -568,6 +568,7 @@ function autoSaveConfig() {
     max_chunk_duration: parseFloat(dom.maxChunkDuration.value),
     context_overlap: parseFloat(dom.contextOverlap.value),
     default_target_lang: dom.defaultTargetLang.value,
+    preprocess_auto_language: dom.ppAutoLang.checked,
   };
   postConfig(config, dom.configStatus);
 }
@@ -582,7 +583,6 @@ function autoSavePreprocess() {
     preprocess_normalize_target: parseFloat(dom.ppNormalizeTarget.value),
     preprocess_highpass: dom.ppHighpass.checked,
     preprocess_highpass_cutoff: parseInt(dom.ppHighpassCutoff.value),
-    preprocess_auto_language: dom.ppAutoLang.checked,
   };
   postConfig(config, dom.preprocessStatus);
 }
@@ -1074,6 +1074,7 @@ function initEvents() {
   bindAutoSlider(dom.contextOverlap, dom.contextOverlapVal, 's', autoSaveConfig);
 
   dom.defaultTargetLang.addEventListener('change', autoSaveConfig);
+  dom.ppAutoLang.addEventListener('change', autoSaveConfig);
   dom.resetConfig.addEventListener('click', resetConfig);
 
   // Export/Import
@@ -1094,10 +1095,6 @@ function initEvents() {
     togglePreprocessSettings(dom.ppHighpass, dom.ppHighpassSettings);
     debounce('preprocess', autoSavePreprocess);
   });
-  dom.ppAutoLang.addEventListener('change', function() {
-    debounce('preprocess', autoSavePreprocess);
-  });
-
   var _ppSliderRaf = {};
   function throttledSliderInput(slider, display, suffix, key) {
     slider.addEventListener('input', function() {
