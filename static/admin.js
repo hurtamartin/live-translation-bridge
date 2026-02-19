@@ -89,6 +89,14 @@ var ADMIN_TRANSLATIONS = {
     audioHistoryError: 'Chyba načtení audio historie',
     keys: 'klíčů',
     mono: 'Mono',
+    lastLatency: 'Poslední latence',
+    lastInference: 'Poslední překlad',
+    autoScrollHistory: 'Auto-scroll',
+    pauseTranslation: 'Pozastavit překlad',
+    resumeTranslation: 'Spustit překlad',
+    translationPaused: 'Překlad pozastaven',
+    translationResumed: 'Překlad spuštěn',
+    agoSuffix: 'zpět',
   },
   en: {
     adminTitle: 'Admin Panel',
@@ -176,6 +184,14 @@ var ADMIN_TRANSLATIONS = {
     audioHistoryError: 'Error loading audio history',
     keys: 'keys',
     mono: 'Mono',
+    lastLatency: 'Last Latency',
+    lastInference: 'Last Inference',
+    autoScrollHistory: 'Auto-scroll',
+    pauseTranslation: 'Pause Translation',
+    resumeTranslation: 'Start Translation',
+    translationPaused: 'Translation paused',
+    translationResumed: 'Translation started',
+    agoSuffix: 'ago',
   }
 };
 
@@ -195,6 +211,7 @@ function updateAdminUI() {
     var key = el.getAttribute('data-i18n');
     el.textContent = adminT(key);
   });
+  updateToggleButton();
 }
 
 /* ========== State ========== */
@@ -210,6 +227,8 @@ var adminState = {
   ppSaveTimer: null,
   lang: localStorage.getItem('adminLang') || 'cs',
   logFilterLevels: JSON.parse(localStorage.getItem('logFilterLevels') || '{"DEBUG":true,"INFO":true,"WARNING":true,"ERROR":true}'),
+  translationAutoScroll: true,
+  translationPaused: false,
 };
 
 var MAX_LOG_ENTRIES = 200;
@@ -285,14 +304,19 @@ var dom = {
   audioHistoryCanvas: document.getElementById('audioHistoryCanvas'),
   // Metrics
   metricTranslations: document.getElementById('metricTranslations'),
+  metricLastLatency: document.getElementById('metricLastLatency'),
   metricEncoder: document.getElementById('metricEncoder'),
   metricDecoder: document.getElementById('metricDecoder'),
+  metricLastInference: document.getElementById('metricLastInference'),
   metricGpu: document.getElementById('metricGpu'),
   // Sessions
   sessionsBody: document.getElementById('sessionsBody'),
   // Translation history
   translationHistory: document.getElementById('translationHistory'),
+  translationAutoScroll: document.getElementById('translationAutoScroll'),
   refreshTranslations: document.getElementById('refreshTranslations'),
+  // Translation control
+  toggleTranslation: document.getElementById('toggleTranslation'),
   // Log
   logContainer: document.getElementById('logContainer'),
   logAutoScroll: document.getElementById('logAutoScroll'),
@@ -440,6 +464,12 @@ function handleStatusData(data) {
   if (c.inference_executor) {
     setDot(dom.dotInference, c.inference_executor.status || 'stopped');
     if (dom.detailInference) dom.detailInference.textContent = adminT('pending') + ': ' + (c.inference_executor.pending_tasks != null ? c.inference_executor.pending_tasks : 0);
+  }
+
+  // Translation pause state
+  if (data.translation_paused !== undefined) {
+    adminState.translationPaused = data.translation_paused;
+    updateToggleButton();
   }
 
   dom.infoClients.textContent = adminT('clients') + ': ' + (data.clients || 0);
@@ -864,8 +894,25 @@ function fetchMetrics() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       dom.metricTranslations.textContent = data.total_translations;
-      dom.metricEncoder.textContent = data.avg_encoder_ms + ' ms';
-      dom.metricDecoder.textContent = data.avg_decoder_ms + ' ms';
+      dom.metricEncoder.textContent = data.avg_encoder_ms ? (data.avg_encoder_ms / 1000).toFixed(2) + ' s' : '--';
+      dom.metricDecoder.textContent = data.avg_decoder_ms ? (data.avg_decoder_ms / 1000).toFixed(2) + ' s' : '--';
+
+      // Last latency (encoder + decoder)
+      var totalLatency = data.last_encoder_ms + data.last_decoder_ms;
+      dom.metricLastLatency.textContent = totalLatency ? (totalLatency / 1000).toFixed(2) + ' s' : '--';
+
+      // Last inference ago
+      if (data.last_inference_ago !== null) {
+        var ago = data.last_inference_ago;
+        if (ago < 60) {
+          dom.metricLastInference.textContent = Math.round(ago) + 's ' + adminT('agoSuffix');
+        } else {
+          dom.metricLastInference.textContent = Math.round(ago / 60) + 'm ' + adminT('agoSuffix');
+        }
+      } else {
+        dom.metricLastInference.textContent = '--';
+      }
+
       if (data.gpu_memory_used_mb !== null) {
         dom.metricGpu.textContent = data.gpu_memory_used_mb + ' / ' + data.gpu_memory_total_mb + ' MB';
       } else {
@@ -945,6 +992,9 @@ function fetchTranslations() {
         });
         dom.translationHistory.appendChild(el);
       });
+      if (adminState.translationAutoScroll) {
+        dom.translationHistory.scrollTop = 0;
+      }
     })
     .catch(function(err) {
       console.error('Translations load error:', err);
@@ -1030,6 +1080,39 @@ function connectLogWs() {
   adminState.logWs.onerror = function(err) {
     console.error('Log WS error:', err);
   };
+}
+
+/* ========== Translation Toggle ========== */
+
+function updateToggleButton() {
+  if (!dom.toggleTranslation) return;
+  if (adminState.translationPaused) {
+    dom.toggleTranslation.textContent = adminT('resumeTranslation');
+    dom.toggleTranslation.className = 'admin-btn admin-btn--primary';
+  } else {
+    dom.toggleTranslation.textContent = adminT('pauseTranslation');
+    dom.toggleTranslation.className = 'admin-btn admin-btn--warning';
+  }
+}
+
+function toggleTranslation() {
+  dom.toggleTranslation.disabled = true;
+  fetch('/api/translation/toggle', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        adminState.translationPaused = data.paused;
+        updateToggleButton();
+        showToast(data.paused ? adminT('translationPaused') : adminT('translationResumed'), data.paused ? 'info' : 'success');
+      }
+    })
+    .catch(function(err) {
+      console.error('Toggle translation error:', err);
+      showToast(adminT('connectionError'), 'error');
+    })
+    .finally(function() {
+      dom.toggleTranslation.disabled = false;
+    });
 }
 
 /* ========== Event Listeners ========== */
@@ -1152,8 +1235,18 @@ function initEvents() {
     }
   });
 
-  // Translation history refresh
+  // Translation history refresh & auto-scroll
   dom.refreshTranslations.addEventListener('click', fetchTranslations);
+  if (dom.translationAutoScroll) {
+    dom.translationAutoScroll.addEventListener('change', function() {
+      adminState.translationAutoScroll = dom.translationAutoScroll.checked;
+    });
+  }
+
+  // Translation toggle (pause/resume)
+  if (dom.toggleTranslation) {
+    dom.toggleTranslation.addEventListener('click', toggleTranslation);
+  }
 }
 
 /* ========== Periodic Data Fetch ========== */
@@ -1163,6 +1256,9 @@ function fetchPeriodicData() {
   fetchMetrics();
   fetchSessions();
   fetchAudioHistory();
+  if (adminState.translationAutoScroll) {
+    fetchTranslations();
+  }
 }
 
 /* ========== Init ========== */
@@ -1177,6 +1273,15 @@ function init() {
   connectLogWs();
   fetchTranslations();
   fetchPeriodicData();
+
+  // Fetch initial translation pause state
+  fetch('/api/translation/status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      adminState.translationPaused = data.paused;
+      updateToggleButton();
+    })
+    .catch(function() { /* ignore, will be updated via WS */ });
 
   var periodicIntervalId = setInterval(fetchPeriodicData, 5000);
   window.addEventListener('beforeunload', function() {

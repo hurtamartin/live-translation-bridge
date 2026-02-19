@@ -201,6 +201,7 @@ async def api_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)
                 "pending_tasks": pending,
             },
         },
+        "translation_paused": state.translation_paused.is_set(),
         "config": dict(runtime_config),
     })
 
@@ -429,6 +430,22 @@ async def api_translations(_user: str = Depends(verify_admin), _rl=Depends(rate_
         return JSONResponse(list(state._translation_history))
 
 
+@app.post("/api/translation/toggle")
+async def api_translation_toggle(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
+    if state.translation_paused.is_set():
+        state.translation_paused.clear()
+        paused = False
+    else:
+        state.translation_paused.set()
+        paused = True
+    return JSONResponse({"ok": True, "paused": paused})
+
+
+@app.get("/api/translation/status")
+async def api_translation_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
+    return JSONResponse({"paused": state.translation_paused.is_set()})
+
+
 @app.get("/api/audio-history")
 async def api_audio_history(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     with state._audio_level_lock:
@@ -501,6 +518,7 @@ async def api_status_ws(websocket: WebSocket):
                     "audio_stream": audio_status,
                     "inference_executor": {"status": "running", "pending_tasks": pending},
                 },
+                "translation_paused": state.translation_paused.is_set(),
             }
             await websocket.send_text(json.dumps(payload))
             await asyncio.sleep(1)
@@ -694,6 +712,18 @@ def processing_loop(loop):
                 should_process = True
 
             if should_process and total_duration >= min_chunk:
+                # If translation is paused, discard the chunk
+                if state.translation_paused.is_set():
+                    overlap_samples = int(ctx_overlap * sr)
+                    if overlap_samples > 0 and buffer_pos > overlap_samples:
+                        prev_audio = audio_buffer[buffer_pos - overlap_samples:buffer_pos].copy()
+                    else:
+                        prev_audio = np.array([], dtype=np.float32)
+                    buffer_pos = 0
+                    is_speaking = False
+                    silence_start = None
+                    continue
+
                 full_audio = audio_buffer[:buffer_pos].copy()
 
                 audio_to_process = full_audio
