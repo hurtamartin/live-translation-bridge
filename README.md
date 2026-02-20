@@ -5,7 +5,7 @@ Real-time speech translation system that captures audio from a microphone, trans
 ## Features
 
 - **Real-time speech-to-text translation** using `facebook/seamless-m4t-v2-large`
-- **6 target languages**: Czech, English, Spanish, Ukrainian, German, Polish
+- **6 target languages**: Czech, English, Russian, Ukrainian, German, Spanish
 - **Per-client language selection** — each viewer picks their own language
 - **Silero VAD** for accurate voice activity detection
 - **Audio resampling** — works with any device sample rate (auto-resamples to 16kHz)
@@ -151,10 +151,10 @@ All parameters can be adjusted at runtime via the admin panel (`/admin`):
 |------|----------|
 | `ces` | Czech (default) |
 | `eng` | English |
-| `spa` | Spanish |
+| `rus` | Russian |
 | `ukr` | Ukrainian |
 | `deu` | German |
-| `pol` | Polish |
+| `spa` | Spanish |
 
 ## Architecture
 

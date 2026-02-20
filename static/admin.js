@@ -4,13 +4,13 @@
 
 var ADMIN_TRANSLATIONS = {
   cs: {
-    adminTitle: 'Admin Panel',
+    adminTitle: 'Administrace',
     mainPage: 'Hlavní stránka',
-    statusTitle: 'Status',
+    statusTitle: 'Stav',
     clients: 'Klienti',
     languages: 'Jazyky',
     hardware: 'Hardware',
-    uptime: 'Uptime',
+    uptime: 'Doba běhu',
     audioDeviceTitle: 'Audio zařízení',
     device: 'Zařízení',
     channel: 'Kanál',
@@ -19,31 +19,31 @@ var ADMIN_TRANSLATIONS = {
     systemDefault: '-- Systémový výchozí --',
     inputSignalTitle: 'Vstupní signál',
     translationParamsTitle: 'Parametry překladu',
-    silenceDuration: 'Silence Duration',
-    minChunkDuration: 'Min Chunk Duration',
-    maxChunkDuration: 'Max Chunk Duration',
-    contextOverlap: 'Context Overlap',
-    defaultTargetLang: 'Default Target Language',
+    silenceDuration: 'Doba ticha',
+    minChunkDuration: 'Min. délka úseku',
+    maxChunkDuration: 'Max. délka úseku',
+    contextOverlap: 'Překryv kontextu',
+    defaultTargetLang: 'Výchozí cílový jazyk',
     defaults: 'Výchozí',
     export: 'Export',
     import: 'Import',
-    preprocessingTitle: 'Audio preprocessing',
+    preprocessingTitle: 'Předzpracování zvuku',
     preprocessingDesc: 'Zpracování vstupního signálu před odesláním do modelu. Zapněte jen to, co potřebujete.',
-    noiseGate: 'Noise Gate',
+    noiseGate: 'Šumová brána',
     noiseGateHint: 'Ztišení audia pod prahem hlasitosti',
-    threshold: 'Threshold',
+    threshold: 'Práh',
     volumeNormalize: 'Normalizace hlasitosti',
     volumeNormalizeHint: 'Vyrovnává úroveň hlasitosti',
-    targetLevel: 'Target level',
-    highpassFilter: 'High-pass filtr',
+    targetLevel: 'Cílová úroveň',
+    highpassFilter: 'Horní propust',
     highpassHint: 'Ořízne hluboké frekvence pod řečí',
-    cutoff: 'Cutoff',
+    cutoff: 'Mezní frekvence',
     autoLangDetect: 'Automatická detekce zdrojového jazyka',
     autoLangHint: 'Model se pokusí detekovat jazyk řeči',
     performanceTitle: 'Výkon',
     totalTranslations: 'Celkem překladů',
-    encoderAvg: 'Encoder (avg)',
-    decoderAvg: 'Decoder (avg)',
+    encoderAvg: 'Enkodér (prům.)',
+    decoderAvg: 'Dekodér (prům.)',
     gpuMemory: 'GPU paměť',
     connectedClientsTitle: 'Připojení klienti',
     thId: 'ID',
@@ -54,7 +54,7 @@ var ADMIN_TRANSLATIONS = {
     translationHistoryTitle: 'Historie překladů',
     refresh: 'Obnovit',
     noTranslations: 'Zatím žádné překlady',
-    logTitle: 'Log',
+    logTitle: 'Protokol',
     autoScroll: 'Auto-scroll',
     clearLog: 'Vymazat',
     confirmCancel: 'Zrušit',
@@ -78,8 +78,8 @@ var ADMIN_TRANSLATIONS = {
     error: 'Chyba',
     ok: 'OK!',
     confirmResetText: 'Opravdu chcete resetovat všechna nastavení na výchozí hodnoty? Tato akce je nevratná.',
-    stopped: 'Stopped',
-    pending: 'Pending',
+    stopped: 'Zastaveno',
+    pending: 'Čeká se',
     statusParseError: 'Chyba zpracování statusu',
     configLoadError: 'Chyba načtení konfigurace',
     logParseError: 'Chyba zpracování logu',
@@ -89,6 +89,14 @@ var ADMIN_TRANSLATIONS = {
     audioHistoryError: 'Chyba načtení audio historie',
     keys: 'klíčů',
     mono: 'Mono',
+    lastLatency: 'Poslední latence',
+    lastInference: 'Poslední překlad',
+    autoScrollHistory: 'Auto-scroll',
+    pauseTranslation: 'Pozastavit překlad',
+    resumeTranslation: 'Spustit překlad',
+    translationPaused: 'Překlad pozastaven',
+    translationResumed: 'Překlad spuštěn',
+    agoSuffix: 'zpět',
   },
   en: {
     adminTitle: 'Admin Panel',
@@ -176,6 +184,14 @@ var ADMIN_TRANSLATIONS = {
     audioHistoryError: 'Error loading audio history',
     keys: 'keys',
     mono: 'Mono',
+    lastLatency: 'Last Latency',
+    lastInference: 'Last Inference',
+    autoScrollHistory: 'Auto-scroll',
+    pauseTranslation: 'Pause Translation',
+    resumeTranslation: 'Start Translation',
+    translationPaused: 'Translation paused',
+    translationResumed: 'Translation started',
+    agoSuffix: 'ago',
   }
 };
 
@@ -195,6 +211,7 @@ function updateAdminUI() {
     var key = el.getAttribute('data-i18n');
     el.textContent = adminT(key);
   });
+  updateToggleButton();
 }
 
 /* ========== State ========== */
@@ -210,6 +227,8 @@ var adminState = {
   ppSaveTimer: null,
   lang: localStorage.getItem('adminLang') || 'cs',
   logFilterLevels: JSON.parse(localStorage.getItem('logFilterLevels') || '{"DEBUG":true,"INFO":true,"WARNING":true,"ERROR":true}'),
+  translationAutoScroll: true,
+  translationPaused: false,
 };
 
 var MAX_LOG_ENTRIES = 200;
@@ -285,14 +304,19 @@ var dom = {
   audioHistoryCanvas: document.getElementById('audioHistoryCanvas'),
   // Metrics
   metricTranslations: document.getElementById('metricTranslations'),
+  metricLastLatency: document.getElementById('metricLastLatency'),
   metricEncoder: document.getElementById('metricEncoder'),
   metricDecoder: document.getElementById('metricDecoder'),
+  metricLastInference: document.getElementById('metricLastInference'),
   metricGpu: document.getElementById('metricGpu'),
   // Sessions
   sessionsBody: document.getElementById('sessionsBody'),
   // Translation history
   translationHistory: document.getElementById('translationHistory'),
+  translationAutoScroll: document.getElementById('translationAutoScroll'),
   refreshTranslations: document.getElementById('refreshTranslations'),
+  // Translation control
+  toggleTranslation: document.getElementById('toggleTranslation'),
   // Log
   logContainer: document.getElementById('logContainer'),
   logAutoScroll: document.getElementById('logAutoScroll'),
@@ -324,6 +348,7 @@ function toggleTheme() {
   var next = current === 'dark' ? 'light' : 'dark';
   localStorage.setItem('theme', next);
   applyTheme();
+  drawAudioHistory();
 }
 
 /* ========== Toast Notifications ========== */
@@ -441,6 +466,12 @@ function handleStatusData(data) {
     if (dom.detailInference) dom.detailInference.textContent = adminT('pending') + ': ' + (c.inference_executor.pending_tasks != null ? c.inference_executor.pending_tasks : 0);
   }
 
+  // Translation pause state
+  if (data.translation_paused !== undefined) {
+    adminState.translationPaused = data.translation_paused;
+    updateToggleButton();
+  }
+
   dom.infoClients.textContent = adminT('clients') + ': ' + (data.clients || 0);
   var langs = data.active_languages || [];
   dom.infoLanguages.textContent = adminT('languages') + ': ' + (langs.length > 0 ? langs.join(', ') : '--');
@@ -506,6 +537,7 @@ function syncConfigUI(config) {
   dom.contextOverlap.value = config.context_overlap;
   dom.contextOverlapVal.textContent = config.context_overlap.toFixed(1) + 's';
   dom.defaultTargetLang.value = config.default_target_lang;
+  dom.ppAutoLang.checked = config.preprocess_auto_language;
 
   if (config.preprocess_noise_gate !== undefined) {
     syncPreprocessUI(config);
@@ -528,7 +560,6 @@ function syncPreprocessUI(config) {
   dom.ppHighpassCutoff.value = config.preprocess_highpass_cutoff;
   dom.ppHighpassCutoffVal.textContent = config.preprocess_highpass_cutoff + ' Hz';
 
-  dom.ppAutoLang.checked = config.preprocess_auto_language;
 }
 
 function togglePreprocessSettings(checkbox, settingsEl) {
@@ -568,6 +599,7 @@ function autoSaveConfig() {
     max_chunk_duration: parseFloat(dom.maxChunkDuration.value),
     context_overlap: parseFloat(dom.contextOverlap.value),
     default_target_lang: dom.defaultTargetLang.value,
+    preprocess_auto_language: dom.ppAutoLang.checked,
   };
   postConfig(config, dom.configStatus);
 }
@@ -582,7 +614,6 @@ function autoSavePreprocess() {
     preprocess_normalize_target: parseFloat(dom.ppNormalizeTarget.value),
     preprocess_highpass: dom.ppHighpass.checked,
     preprocess_highpass_cutoff: parseInt(dom.ppHighpassCutoff.value),
-    preprocess_auto_language: dom.ppAutoLang.checked,
   };
   postConfig(config, dom.preprocessStatus);
 }
@@ -755,7 +786,6 @@ function applyDeviceSelection() {
   var channel = parseInt(dom.channelSelect.value);
 
   dom.applyDevice.disabled = true;
-  dom.applyDevice.textContent = adminT('loading');
 
   fetch('/api/devices/select', {
     method: 'POST',
@@ -765,23 +795,17 @@ function applyDeviceSelection() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok) {
-        dom.applyDevice.textContent = adminT('ok');
         showToast(adminT('deviceChanged'), 'success');
       } else {
-        dom.applyDevice.textContent = adminT('error');
         showToast(adminT('error') + ': ' + (data.error || adminT('unknownError')), 'error');
       }
     })
     .catch(function(err) {
       console.error('Device select error:', err);
-      dom.applyDevice.textContent = adminT('error');
       showToast(adminT('error') + ': ' + err.message, 'error');
     })
     .finally(function() {
-      setTimeout(function() {
-        dom.applyDevice.disabled = false;
-        dom.applyDevice.textContent = adminT('apply');
-      }, 1500);
+      dom.applyDevice.disabled = false;
     });
 }
 
@@ -870,8 +894,25 @@ function fetchMetrics() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       dom.metricTranslations.textContent = data.total_translations;
-      dom.metricEncoder.textContent = data.avg_encoder_ms + ' ms';
-      dom.metricDecoder.textContent = data.avg_decoder_ms + ' ms';
+      dom.metricEncoder.textContent = data.avg_encoder_ms ? (data.avg_encoder_ms / 1000).toFixed(2) + ' s' : '--';
+      dom.metricDecoder.textContent = data.avg_decoder_ms ? (data.avg_decoder_ms / 1000).toFixed(2) + ' s' : '--';
+
+      // Last latency (encoder + decoder)
+      var totalLatency = data.last_encoder_ms + data.last_decoder_ms;
+      dom.metricLastLatency.textContent = totalLatency ? (totalLatency / 1000).toFixed(2) + ' s' : '--';
+
+      // Last inference ago
+      if (data.last_inference_ago !== null) {
+        var ago = data.last_inference_ago;
+        if (ago < 60) {
+          dom.metricLastInference.textContent = Math.round(ago) + 's ' + adminT('agoSuffix');
+        } else {
+          dom.metricLastInference.textContent = Math.round(ago / 60) + 'm ' + adminT('agoSuffix');
+        }
+      } else {
+        dom.metricLastInference.textContent = '--';
+      }
+
       if (data.gpu_memory_used_mb !== null) {
         dom.metricGpu.textContent = data.gpu_memory_used_mb + ' / ' + data.gpu_memory_total_mb + ' MB';
       } else {
@@ -951,6 +992,9 @@ function fetchTranslations() {
         });
         dom.translationHistory.appendChild(el);
       });
+      if (adminState.translationAutoScroll) {
+        dom.translationHistory.scrollTop = 0;
+      }
     })
     .catch(function(err) {
       console.error('Translations load error:', err);
@@ -1038,6 +1082,39 @@ function connectLogWs() {
   };
 }
 
+/* ========== Translation Toggle ========== */
+
+function updateToggleButton() {
+  if (!dom.toggleTranslation) return;
+  if (adminState.translationPaused) {
+    dom.toggleTranslation.textContent = adminT('resumeTranslation');
+    dom.toggleTranslation.className = 'admin-btn admin-btn--primary';
+  } else {
+    dom.toggleTranslation.textContent = adminT('pauseTranslation');
+    dom.toggleTranslation.className = 'admin-btn admin-btn--warning';
+  }
+}
+
+function toggleTranslation() {
+  dom.toggleTranslation.disabled = true;
+  fetch('/api/translation/toggle', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        adminState.translationPaused = data.paused;
+        updateToggleButton();
+        showToast(data.paused ? adminT('translationPaused') : adminT('translationResumed'), data.paused ? 'info' : 'success');
+      }
+    })
+    .catch(function(err) {
+      console.error('Toggle translation error:', err);
+      showToast(adminT('connectionError'), 'error');
+    })
+    .finally(function() {
+      dom.toggleTranslation.disabled = false;
+    });
+}
+
 /* ========== Event Listeners ========== */
 
 function initEvents() {
@@ -1074,6 +1151,7 @@ function initEvents() {
   bindAutoSlider(dom.contextOverlap, dom.contextOverlapVal, 's', autoSaveConfig);
 
   dom.defaultTargetLang.addEventListener('change', autoSaveConfig);
+  dom.ppAutoLang.addEventListener('change', autoSaveConfig);
   dom.resetConfig.addEventListener('click', resetConfig);
 
   // Export/Import
@@ -1094,10 +1172,6 @@ function initEvents() {
     togglePreprocessSettings(dom.ppHighpass, dom.ppHighpassSettings);
     debounce('preprocess', autoSavePreprocess);
   });
-  dom.ppAutoLang.addEventListener('change', function() {
-    debounce('preprocess', autoSavePreprocess);
-  });
-
   var _ppSliderRaf = {};
   function throttledSliderInput(slider, display, suffix, key) {
     slider.addEventListener('input', function() {
@@ -1161,8 +1235,18 @@ function initEvents() {
     }
   });
 
-  // Translation history refresh
+  // Translation history refresh & auto-scroll
   dom.refreshTranslations.addEventListener('click', fetchTranslations);
+  if (dom.translationAutoScroll) {
+    dom.translationAutoScroll.addEventListener('change', function() {
+      adminState.translationAutoScroll = dom.translationAutoScroll.checked;
+    });
+  }
+
+  // Translation toggle (pause/resume)
+  if (dom.toggleTranslation) {
+    dom.toggleTranslation.addEventListener('click', toggleTranslation);
+  }
 }
 
 /* ========== Periodic Data Fetch ========== */
@@ -1172,6 +1256,9 @@ function fetchPeriodicData() {
   fetchMetrics();
   fetchSessions();
   fetchAudioHistory();
+  if (adminState.translationAutoScroll) {
+    fetchTranslations();
+  }
 }
 
 /* ========== Init ========== */
@@ -1186,6 +1273,15 @@ function init() {
   connectLogWs();
   fetchTranslations();
   fetchPeriodicData();
+
+  // Fetch initial translation pause state
+  fetch('/api/translation/status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      adminState.translationPaused = data.paused;
+      updateToggleButton();
+    })
+    .catch(function() { /* ignore, will be updated via WS */ });
 
   var periodicIntervalId = setInterval(fetchPeriodicData, 5000);
   window.addEventListener('beforeunload', function() {

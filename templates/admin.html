@@ -41,7 +41,10 @@
   <main class="admin-main">
     <!-- A) Status Dashboard -->
     <section class="admin-card">
-      <h2 class="admin-card__title" data-i18n="statusTitle">Status</h2>
+      <div class="admin-card__header">
+        <h2 class="admin-card__title" data-i18n="statusTitle">Status</h2>
+        <button class="admin-btn admin-btn--warning" id="toggleTranslation">...</button>
+      </div>
       <div class="status-grid" id="statusGrid">
         <div class="status-item">
           <span class="status-item__dot" id="dotModel"></span>
@@ -146,11 +149,22 @@
           <select class="admin-select" id="defaultTargetLang">
             <option value="ces">Czech</option>
             <option value="eng">English</option>
-            <option value="spa">Spanish</option>
+            <option value="rus">Russian</option>
             <option value="ukr">Ukrainian</option>
             <option value="deu">German</option>
-            <option value="pol">Polish</option>
+            <option value="spa">Spanish</option>
           </select>
+        </div>
+
+        <!-- Auto language detection -->
+        <div class="preprocess-item">
+          <div class="preprocess-item__header">
+            <label class="preprocess-toggle">
+              <input type="checkbox" id="ppAutoLang">
+              <span class="preprocess-toggle__label" data-i18n="autoLangDetect">Automaticka detekce zdrojoveho jazyka</span>
+            </label>
+            <span class="preprocess-item__hint" data-i18n="autoLangHint">Model se pokusi detekovat jazyk reci</span>
+          </div>
         </div>
 
         <div class="admin-form__actions">
@@ -223,17 +237,6 @@
           </div>
         </div>
 
-        <!-- Auto language detection -->
-        <div class="preprocess-item">
-          <div class="preprocess-item__header">
-            <label class="preprocess-toggle">
-              <input type="checkbox" id="ppAutoLang">
-              <span class="preprocess-toggle__label" data-i18n="autoLangDetect">Automaticka detekce zdrojoveho jazyka</span>
-            </label>
-            <span class="preprocess-item__hint" data-i18n="autoLangHint">Model se pokusi detekovat jazyk reci</span>
-          </div>
-        </div>
-
         <div class="admin-form__actions">
           <span class="save-status" id="preprocessStatus"></span>
         </div>
@@ -249,12 +252,20 @@
           <div class="metric-item__label" data-i18n="totalTranslations">Celkem prekladu</div>
         </div>
         <div class="metric-item">
+          <div class="metric-item__value" id="metricLastLatency">--</div>
+          <div class="metric-item__label" data-i18n="lastLatency">Posledni latence</div>
+        </div>
+        <div class="metric-item">
           <div class="metric-item__value" id="metricEncoder">--</div>
           <div class="metric-item__label" data-i18n="encoderAvg">Encoder (avg)</div>
         </div>
         <div class="metric-item">
           <div class="metric-item__value" id="metricDecoder">--</div>
           <div class="metric-item__label" data-i18n="decoderAvg">Decoder (avg)</div>
+        </div>
+        <div class="metric-item">
+          <div class="metric-item__value" id="metricLastInference">--</div>
+          <div class="metric-item__label" data-i18n="lastInference">Posledni preklad</div>
         </div>
         <div class="metric-item">
           <div class="metric-item__value" id="metricGpu">--</div>
@@ -287,7 +298,12 @@
     <section class="admin-card">
       <div class="admin-card__header">
         <h2 class="admin-card__title" data-i18n="translationHistoryTitle">Historie prekladu</h2>
-        <button class="admin-btn admin-btn--small" id="refreshTranslations" data-i18n="refresh">Obnovit</button>
+        <div class="admin-card__header-actions">
+          <label class="admin-label--inline">
+            <input type="checkbox" id="translationAutoScroll" checked> <span data-i18n="autoScrollHistory">Auto-scroll</span>
+          </label>
+          <button class="admin-btn admin-btn--small" id="refreshTranslations" data-i18n="refresh">Obnovit</button>
+        </div>
       </div>
       <div class="translation-history" id="translationHistory">
         <div class="translation-history__empty" data-i18n="noTranslations">Zatim zadne preklady</div>
@@ -298,7 +314,7 @@
     <section class="admin-card admin-card--log">
       <div class="admin-card__header">
         <h2 class="admin-card__title" data-i18n="logTitle">Log</h2>
-        <div>
+        <div class="log-header-controls">
           <label class="admin-label--inline">
             <input type="checkbox" id="logAutoScroll" checked> <span data-i18n="autoScroll">Auto-scroll</span>
           </label>

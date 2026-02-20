@@ -15,6 +15,7 @@ from src.translation.engine import load_model, warmup_model
 audio_queue = queue.Queue(maxsize=500)
 translation_queue = asyncio.Queue()
 stop_event = threading.Event()
+translation_paused = threading.Event()  # when set, translation is paused
 audio_stream = None
 audio_stream_lock = threading.Lock()
 audio_device_error = threading.Event()  # signaled when audio device fails
