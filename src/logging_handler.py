@@ -3,6 +3,7 @@ import collections
 import json as _json
 import logging
 import os
+import queue as _queue
 import threading
 import time
 
@@ -24,12 +25,32 @@ class JsonFormatter(logging.Formatter):
         }, ensure_ascii=False)
 
 
+class _ThreadSafeLogQueue:
+    """Wrapper that bridges thread-safe queue.Queue to async consumption."""
+    def __init__(self, maxsize=100):
+        self._q = _queue.Queue(maxsize=maxsize)
+
+    def put_nowait(self, item):
+        try:
+            self._q.put_nowait(item)
+        except _queue.Full:
+            pass
+
+    async def get(self):
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                return await loop.run_in_executor(None, lambda: self._q.get(timeout=1.0))
+            except _queue.Empty:
+                continue
+
+
 class LogBufferHandler(logging.Handler):
     """Custom handler that stores log records in a deque for WebSocket streaming."""
     def __init__(self, maxlen=500):
         super().__init__()
         self.buffer = collections.deque(maxlen=maxlen)
-        self.listeners: list[asyncio.Queue] = []
+        self.listeners: list[_ThreadSafeLogQueue] = []
         self._lock = threading.Lock()
 
     def emit(self, record):
@@ -41,18 +62,15 @@ class LogBufferHandler(logging.Handler):
         with self._lock:
             self.buffer.append(entry)
             for q in self.listeners:
-                try:
-                    q.put_nowait(entry)
-                except asyncio.QueueFull:
-                    pass
+                q.put_nowait(entry)
 
-    def add_listener(self) -> asyncio.Queue:
-        q = asyncio.Queue(maxsize=100)
+    def add_listener(self) -> "_ThreadSafeLogQueue":
+        q = _ThreadSafeLogQueue(maxsize=100)
         with self._lock:
             self.listeners.append(q)
         return q
 
-    def remove_listener(self, q: asyncio.Queue):
+    def remove_listener(self, q: "_ThreadSafeLogQueue"):
         with self._lock:
             try:
                 self.listeners.remove(q)

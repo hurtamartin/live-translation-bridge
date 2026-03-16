@@ -30,9 +30,6 @@ class SessionManager:
 
     async def connect(self, websocket: WebSocket) -> str | None:
         """Accept a new WebSocket client. Returns session_id, or None if limit reached."""
-        with self._lock:
-            if len(self._sessions) >= MAX_CLIENTS:
-                return None
         await websocket.accept()
         session_id = str(uuid.uuid4())
         client_ip = ""
@@ -40,6 +37,8 @@ class SessionManager:
             client_ip = websocket.client.host
         session = ClientSession(session_id=session_id, websocket=websocket, client_ip=client_ip)
         with self._lock:
+            if len(self._sessions) >= MAX_CLIENTS:
+                return None
             self._sessions[session_id] = session
         return session_id
 

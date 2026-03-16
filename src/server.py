@@ -11,6 +11,7 @@ import numpy as np
 import secrets
 import sounddevice as sd
 import torch
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -623,6 +624,8 @@ def processing_loop(loop):
     VAD_MIN_SAMPLES = 512
     last_future = None
     last_future_time = 0
+    last_vad_reset = time.time()
+    VAD_RESET_INTERVAL = 300  # reset VAD states every 5 minutes to prevent drift
 
     # Pre-allocated VAD buffer at 16kHz (VAD requires 16kHz)
     VAD_BUFFER_MAX = 16000  # ~1s at 16kHz
@@ -641,6 +644,13 @@ def processing_loop(loop):
             chunk = state.audio_queue.get(timeout=0.1)
             chunk_np = np.concatenate(chunk).flatten()
 
+            # Periodic VAD state reset to prevent RNN drift
+            now_vad_reset = time.time()
+            if now_vad_reset - last_vad_reset > VAD_RESET_INTERVAL:
+                state.vad_model.reset_states()
+                last_vad_reset = now_vad_reset
+                logger.debug("VAD states reset (periodic)")
+
             # Detect SR change (device switch) — reset buffer
             current_native_sr = state.native_sample_rate
             if current_native_sr != native_sr:
@@ -653,6 +663,8 @@ def processing_loop(loop):
                 is_speaking = False
                 silence_start = None
                 vad_pos = 0
+                state.vad_model.reset_states()
+                last_vad_reset = now_vad_reset
 
             # Grab resampler for VAD (chunk_np stays at native SR for main buffer)
             with state.audio_stream_lock:
@@ -754,9 +766,16 @@ def processing_loop(loop):
                     if last_future is not None and not last_future.done():
                         elapsed = time.time() - last_future_time
                         if elapsed > INFERENCE_TIMEOUT:
-                            logger.critical(f"Inference stuck for {elapsed:.0f}s — skipping new submission")
+                            logger.critical(f"Inference stuck for {elapsed:.0f}s — recreating executor")
                             last_future.cancel()
                             last_future = None
+                            # Force-reset pending counter and recreate executor
+                            # (the old thread may still run but the new executor is usable)
+                            with state.inference_pending_lock:
+                                state.inference_pending = 0
+                            old_executor = state.inference_executor
+                            state.inference_executor = ThreadPoolExecutor(max_workers=1)
+                            old_executor.shutdown(wait=False)
                         else:
                             logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference busy ({elapsed:.0f}s)")
                     else:
@@ -778,6 +797,10 @@ def processing_loop(loop):
                 buffer_pos = 0
                 is_speaking = False
                 silence_start = None
+
+                # Reset VAD after each speech segment to prevent state drift
+                state.vad_model.reset_states()
+                last_vad_reset = time.time()
 
             elif not is_speaking and total_duration > min_chunk:
                 samples_to_keep = int(native_sr * 1.0)
