@@ -65,7 +65,7 @@ def rate_limit(request: Request):
 from src.translation.engine import MODEL_NAME, translate_audio
 from src.audio.capture import (
     get_audio_devices, restart_audio_stream, compute_audio_level,
-    resample_audio, is_speech,
+    resample_audio,
 )
 import src.state as state
 
@@ -303,6 +303,8 @@ async def api_config_post(request: Request, _user: str = Depends(verify_admin), 
         body = await request.json()
         validated, errors = _validate_config_values(body)
 
+        old_sample_rate = runtime_config.get("sample_rate")
+
         for key, value in validated.items():
             runtime_config[key] = value
 
@@ -311,6 +313,15 @@ async def api_config_post(request: Request, _user: str = Depends(verify_admin), 
 
         save_config()
         logger.info(f"Config updated: {body}")
+
+        # Restart audio stream if sample_rate changed (resampler needs rebuilding)
+        if "sample_rate" in validated and validated["sample_rate"] != old_sample_rate:
+            logger.warning(f"sample_rate changed {old_sample_rate} -> {validated['sample_rate']}, restarting audio stream")
+            try:
+                restart_audio_stream(runtime_config["audio_device_index"], runtime_config["audio_channel"], state)
+            except Exception as e:
+                logger.error(f"Failed to restart audio stream after sample_rate change: {e}")
+
         return JSONResponse(dict(runtime_config))
     except Exception as e:
         logger.error(f"Error updating config: {e}")
@@ -358,14 +369,14 @@ async def health_check():
             gpu_ok = False
 
     if model_ok and thread_ok and audio_ok and gpu_ok:
-        status = "healthy"
+        health_status = "healthy"
     elif model_ok and thread_ok:
-        status = "degraded"
+        health_status = "degraded"
     else:
-        status = "unhealthy"
+        health_status = "unhealthy"
 
     return JSONResponse({
-        "status": status,
+        "status": health_status,
         "uptime": int(time.time() - state.start_time),
         "clients": state.manager.client_count(),
         "audio_stream": "running" if audio_ok else "stopped",
@@ -615,7 +626,8 @@ INFERENCE_TIMEOUT = 30  # seconds — log critical if inference exceeds this
 def processing_loop(loop):
     # Buffer stores audio at NATIVE sample rate (no per-chunk resampling)
     native_sr = state.native_sample_rate
-    MAX_BUFFER_SAMPLES = native_sr * int(runtime_config["max_chunk_duration"] + 5)
+    current_max_chunk = runtime_config["max_chunk_duration"]
+    MAX_BUFFER_SAMPLES = native_sr * int(current_max_chunk + 5)
     audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
     buffer_pos = 0
     prev_audio = np.array([], dtype=np.float32)  # stored at native SR
@@ -638,6 +650,7 @@ def processing_loop(loop):
     _last_level_update = 0.0
     _pending_level = -60.0
     _pending_peak = -60.0
+    _last_overflow_warn = 0.0
 
     while not state.stop_event.is_set():
         try:
@@ -656,7 +669,8 @@ def processing_loop(loop):
             if current_native_sr != native_sr:
                 logger.info(f"Sample rate changed {native_sr} -> {current_native_sr}, resetting buffer")
                 native_sr = current_native_sr
-                MAX_BUFFER_SAMPLES = native_sr * int(runtime_config["max_chunk_duration"] + 5)
+                current_max_chunk = runtime_config["max_chunk_duration"]
+                MAX_BUFFER_SAMPLES = native_sr * int(current_max_chunk + 5)
                 audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
                 buffer_pos = 0
                 prev_audio = np.array([], dtype=np.float32)
@@ -665,6 +679,20 @@ def processing_loop(loop):
                 vad_pos = 0
                 state.vad_model.reset_states()
                 last_vad_reset = now_vad_reset
+
+            # Detect max_chunk_duration change — resize buffer
+            new_max_chunk = runtime_config["max_chunk_duration"]
+            if new_max_chunk != current_max_chunk:
+                logger.info(f"max_chunk_duration changed {current_max_chunk} -> {new_max_chunk}, resizing buffer")
+                current_max_chunk = new_max_chunk
+                new_max_samples = native_sr * int(new_max_chunk + 5)
+                new_buffer = np.zeros(new_max_samples, dtype=np.float32)
+                keep = min(buffer_pos, new_max_samples)
+                if keep > 0:
+                    new_buffer[:keep] = audio_buffer[buffer_pos - keep:buffer_pos]
+                audio_buffer = new_buffer
+                buffer_pos = keep
+                MAX_BUFFER_SAMPLES = new_max_samples
 
             # Grab resampler for VAD (chunk_np stays at native SR for main buffer)
             with state.audio_stream_lock:
@@ -695,6 +723,11 @@ def processing_loop(loop):
             if buffer_pos + n <= MAX_BUFFER_SAMPLES:
                 audio_buffer[buffer_pos:buffer_pos + n] = chunk_np
                 buffer_pos += n
+            else:
+                now_overflow = time.time()
+                if now_overflow - _last_overflow_warn > 5.0:
+                    logger.warning(f"Audio buffer overflow: dropping {n} samples (buffer full at {buffer_pos}/{MAX_BUFFER_SAMPLES})")
+                    _last_overflow_warn = now_overflow
 
             # VAD buffer uses 16kHz resampled data
             vad_n = min(chunk_16k.shape[0], VAD_BUFFER_MAX - vad_pos)
@@ -773,9 +806,16 @@ def processing_loop(loop):
                             # (the old thread may still run but the new executor is usable)
                             with state.inference_pending_lock:
                                 state.inference_pending = 0
+                            with state._perf_lock:
+                                state._perf_metrics["stuck_inference_count"] += 1
                             old_executor = state.inference_executor
                             state.inference_executor = ThreadPoolExecutor(max_workers=1)
                             old_executor.shutdown(wait=False)
+                            if state.device and state.device.type == "cuda":
+                                try:
+                                    torch.cuda.empty_cache()
+                                except Exception:
+                                    pass
                         else:
                             logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference busy ({elapsed:.0f}s)")
                     else:

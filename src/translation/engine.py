@@ -48,11 +48,18 @@ def warmup_model(processor, model, device, dtype, sample_rate):
     logger.info(f"Warm-up complete ({', '.join(warmup_langs)}).")
 
 
+MAX_AUDIO_SECONDS = 35  # safety cap: 5s margin above max configurable 30s
+
+
 def translate_audio(audio_np, target_langs, processor, model, device, dtype, config, perf_metrics, perf_lock, translation_history, translation_history_lock):
     """Translate audio to multiple languages. Encoder runs once, decoder per language."""
     processed_audio = preprocess_audio(audio_np, config)
 
     sr = config["sample_rate"]
+    max_samples = int(MAX_AUDIO_SECONDS * sr)
+    if processed_audio.shape[0] > max_samples:
+        logger.warning(f"Audio too long ({processed_audio.shape[0]/sr:.1f}s > {MAX_AUDIO_SECONDS}s), truncating to latest {MAX_AUDIO_SECONDS}s")
+        processed_audio = processed_audio[-max_samples:]
     inputs = processor(audio=processed_audio, sampling_rate=sr, return_tensors="pt")
     inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
               for k, v in inputs.items()}
@@ -61,12 +68,19 @@ def translate_audio(audio_np, target_langs, processor, model, device, dtype, con
     encoder_kwargs = {k: v for k, v in inputs.items() if k in ('input_features', 'attention_mask')}
     results = {}
     with torch.no_grad():
-        t_enc = time.time()
-        encoder_out = model.get_encoder()(**encoder_kwargs)
-        enc_ms = (time.time() - t_enc) * 1000
-        logger.debug(f"Encoder: {enc_ms:.0f}ms")
-        with perf_lock:
-            perf_metrics["encoder_ms"].append(enc_ms)
+        try:
+            t_enc = time.time()
+            encoder_out = model.get_encoder()(**encoder_kwargs)
+            enc_ms = (time.time() - t_enc) * 1000
+            logger.debug(f"Encoder: {enc_ms:.0f}ms")
+            with perf_lock:
+                perf_metrics["encoder_ms"].append(enc_ms)
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                logger.error(f"GPU OOM during encoding: {e}")
+                torch.cuda.empty_cache()
+                return {}
+            raise
 
         for lang in target_langs:
             try:
@@ -83,9 +97,17 @@ def translate_audio(audio_np, target_langs, processor, model, device, dtype, con
                 with perf_lock:
                     perf_metrics["decoder_ms"].append(dec_ms)
                 text = processor.decode(output_tokens[0].tolist(), skip_special_tokens=True).strip()
-                text = text.replace("#err", "")
+                if text == "#err":
+                    logger.debug(f"Decoder [{lang}]: got #err token, skipping")
+                    continue
                 if text:
                     results[lang] = text
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    logger.error(f"GPU OOM during decoding [{lang}]: {e}")
+                    torch.cuda.empty_cache()
+                    continue
+                logger.error(f"Translation error for {lang}: {e}")
             except Exception as e:
                 logger.error(f"Translation error for {lang}: {e}")
 

@@ -41,7 +41,7 @@ var ADMIN_TRANSLATIONS = {
     highpassHint: 'Ořízne hluboké frekvence pod řečí',
     cutoff: 'Mezní frekvence',
     autoLangDetect: 'Automatická detekce zdrojového jazyka',
-    autoLangHint: 'Model se pokusí detekovat jazyk řeči',
+    autoLangHint: 'Model se pokusí detekovat jazyk řeči (Zatím neimplementováno)',
     performanceTitle: 'Výkon',
     totalTranslations: 'Celkem překladů',
     encoderAvg: 'Enkodér (prům.)',
@@ -138,7 +138,7 @@ var ADMIN_TRANSLATIONS = {
     highpassHint: 'Cuts low frequencies below speech range',
     cutoff: 'Cutoff',
     autoLangDetect: 'Auto source language detection',
-    autoLangHint: 'Model will try to detect speech language',
+    autoLangHint: 'Model will try to detect speech language (Not yet implemented)',
     performanceTitle: 'Performance',
     totalTranslations: 'Total translations',
     encoderAvg: 'Encoder (avg)',
@@ -610,7 +610,6 @@ function autoSaveConfig() {
     context_overlap: parseFloat(dom.contextOverlap.value),
     num_beams: parseInt(dom.numBeams.value),
     default_target_lang: dom.defaultTargetLang.value,
-    preprocess_auto_language: dom.ppAutoLang.checked,
   };
   postConfig(config, dom.configStatus);
 }
@@ -1169,7 +1168,7 @@ function initEvents() {
   dom.numBeams.addEventListener('change', autoSaveConfig);
 
   dom.defaultTargetLang.addEventListener('change', autoSaveConfig);
-  dom.ppAutoLang.addEventListener('change', autoSaveConfig);
+  // dom.ppAutoLang — disabled, not yet implemented
   dom.resetConfig.addEventListener('click', resetConfig);
 
   // Export/Import

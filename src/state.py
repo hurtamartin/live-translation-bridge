@@ -35,6 +35,7 @@ _perf_metrics = {
     "decoder_ms": collections.deque(maxlen=100),
     "total_translations": 0,
     "last_inference_time": 0,
+    "stuck_inference_count": 0,
 }
 _perf_lock = threading.Lock()
 
