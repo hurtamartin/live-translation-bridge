@@ -145,6 +145,13 @@
         </div>
 
         <div class="admin-slider-group">
+          <label class="admin-label" data-i18n="numBeams">Beam Search</label>
+          <input type="range" class="admin-slider" id="numBeams" min="1" max="5" step="1" value="1">
+          <span class="admin-slider__value" id="numBeamsVal">1</span>
+          <span class="preprocess-item__hint" data-i18n="numBeamsHint">1 = rychle, nizsi kvalita | 5 = pomaleji, vyssi kvalita</span>
+        </div>
+
+        <div class="admin-slider-group">
           <label class="admin-label" data-i18n="defaultTargetLang">Default Target Language</label>
           <select class="admin-select" id="defaultTargetLang">
             <option value="ces">Czech</option>

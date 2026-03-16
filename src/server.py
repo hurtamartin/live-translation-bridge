@@ -612,25 +612,26 @@ INFERENCE_TIMEOUT = 30  # seconds — log critical if inference exceeds this
 
 
 def processing_loop(loop):
-    MAX_BUFFER_SAMPLES = state.native_sample_rate * int(runtime_config["max_chunk_duration"] + 5)
+    # Buffer stores audio at NATIVE sample rate (no per-chunk resampling)
+    native_sr = state.native_sample_rate
+    MAX_BUFFER_SAMPLES = native_sr * int(runtime_config["max_chunk_duration"] + 5)
     audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
     buffer_pos = 0
-    prev_audio = np.array([], dtype=np.float32)
+    prev_audio = np.array([], dtype=np.float32)  # stored at native SR
     silence_start = None
     is_speaking = False
     VAD_MIN_SAMPLES = 512
     last_future = None
     last_future_time = 0
 
-    # Pre-allocated VAD buffer (numpy) with index pointer — no torch.cat per chunk
-    VAD_BUFFER_MAX = 16000  # ~1s at 16kHz, far more than needed
+    # Pre-allocated VAD buffer at 16kHz (VAD requires 16kHz)
+    VAD_BUFFER_MAX = 16000  # ~1s at 16kHz
     vad_np_buffer = np.zeros(VAD_BUFFER_MAX, dtype=np.float32)
     vad_pos = 0
     vad_buffer_time = time.time()
-    # Pre-allocated tensor for VAD inference (reused every call)
     vad_chunk_tensor = torch.zeros(VAD_MIN_SAMPLES, dtype=torch.float32)
 
-    _level_update_interval = 0.1  # update audio level at most 10x/s
+    _level_update_interval = 0.1
     _last_level_update = 0.0
     _pending_level = -60.0
     _pending_peak = -60.0
@@ -640,13 +641,28 @@ def processing_loop(loop):
             chunk = state.audio_queue.get(timeout=0.1)
             chunk_np = np.concatenate(chunk).flatten()
 
-            # Grab resampler reference under lock (restart_audio_stream writes it)
+            # Detect SR change (device switch) — reset buffer
+            current_native_sr = state.native_sample_rate
+            if current_native_sr != native_sr:
+                logger.info(f"Sample rate changed {native_sr} -> {current_native_sr}, resetting buffer")
+                native_sr = current_native_sr
+                MAX_BUFFER_SAMPLES = native_sr * int(runtime_config["max_chunk_duration"] + 5)
+                audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
+                buffer_pos = 0
+                prev_audio = np.array([], dtype=np.float32)
+                is_speaking = False
+                silence_start = None
+                vad_pos = 0
+
+            # Grab resampler for VAD (chunk_np stays at native SR for main buffer)
             with state.audio_stream_lock:
                 current_resampler = state.resampler
-            chunk_np = resample_audio(chunk_np, current_resampler)
 
+            # Resample only for VAD (16kHz required by Silero)
+            chunk_16k = resample_audio(chunk_np, current_resampler)
+
+            # Audio level computed on native SR (RMS/dB is SR-independent)
             level = compute_audio_level(chunk_np)
-            # Track max since last flush (lock-free local vars)
             if level > _pending_level:
                 _pending_level = level
             if level > _pending_peak:
@@ -662,35 +678,34 @@ def processing_loop(loop):
                 _pending_peak = -60.0
                 _last_level_update = now_lvl
 
+            # Store chunk at native SR in main buffer
             n = chunk_np.shape[0]
             if buffer_pos + n <= MAX_BUFFER_SAMPLES:
                 audio_buffer[buffer_pos:buffer_pos + n] = chunk_np
                 buffer_pos += n
 
-            # Append to VAD numpy buffer (no allocation)
-            vad_n = min(n, VAD_BUFFER_MAX - vad_pos)
+            # VAD buffer uses 16kHz resampled data
+            vad_n = min(chunk_16k.shape[0], VAD_BUFFER_MAX - vad_pos)
             if vad_n > 0:
-                vad_np_buffer[vad_pos:vad_pos + vad_n] = chunk_np[:vad_n]
+                vad_np_buffer[vad_pos:vad_pos + vad_n] = chunk_16k[:vad_n]
                 vad_pos += vad_n
             vad_buffer_time = time.time()
             speech_detected = is_speaking
 
-            # Process VAD in 512-sample steps using pointer into pre-allocated buffer
+            # Process VAD in 512-sample steps
             vad_read_pos = 0
             while vad_pos - vad_read_pos >= VAD_MIN_SAMPLES:
                 vad_chunk_tensor.copy_(torch.from_numpy(vad_np_buffer[vad_read_pos:vad_read_pos + VAD_MIN_SAMPLES]))
                 vad_read_pos += VAD_MIN_SAMPLES
-                confidence = state.vad_model(vad_chunk_tensor, runtime_config["sample_rate"]).item()
+                confidence = state.vad_model(vad_chunk_tensor, 16000).item()
                 speech_detected = confidence > 0.5
-            # Shift remaining samples to front (memmove, no allocation)
             remaining = vad_pos - vad_read_pos
             if remaining > 0 and vad_read_pos > 0:
                 vad_np_buffer[:remaining] = vad_np_buffer[vad_read_pos:vad_read_pos + remaining]
             vad_pos = remaining
 
-            sr = runtime_config["sample_rate"]
-            total_frames = buffer_pos
-            total_duration = total_frames / sr
+            # Duration calculations use native SR
+            total_duration = buffer_pos / native_sr
             current_time = time.time()
 
             if speech_detected:
@@ -714,7 +729,7 @@ def processing_loop(loop):
             if should_process and total_duration >= min_chunk:
                 # If translation is paused, discard the chunk
                 if state.translation_paused.is_set():
-                    overlap_samples = int(ctx_overlap * sr)
+                    overlap_samples = int(ctx_overlap * native_sr)
                     if overlap_samples > 0 and buffer_pos > overlap_samples:
                         prev_audio = audio_buffer[buffer_pos - overlap_samples:buffer_pos].copy()
                     else:
@@ -730,6 +745,9 @@ def processing_loop(loop):
                 if prev_audio.size > 0:
                     audio_to_process = np.concatenate((prev_audio, full_audio))
 
+                # Resample entire segment ONCE before sending to model
+                audio_to_process = resample_audio(audio_to_process, current_resampler)
+
                 target_langs = state.manager.get_unique_languages()
                 if target_langs:
                     # Check for stuck inference
@@ -739,7 +757,6 @@ def processing_loop(loop):
                             logger.critical(f"Inference stuck for {elapsed:.0f}s — skipping new submission")
                             last_future.cancel()
                             last_future = None
-                            # Skip this chunk
                         else:
                             logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference busy ({elapsed:.0f}s)")
                     else:
@@ -751,7 +768,8 @@ def processing_loop(loop):
                                 last_future = state.inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
                                 last_future_time = time.time()
 
-                samples_ctx = int(sr * ctx_overlap)
+                # Context overlap stored at native SR
+                samples_ctx = int(native_sr * ctx_overlap)
                 if full_audio.shape[0] > samples_ctx:
                     prev_audio = full_audio[-samples_ctx:]
                 else:
@@ -762,25 +780,27 @@ def processing_loop(loop):
                 silence_start = None
 
             elif not is_speaking and total_duration > min_chunk:
-                samples_to_keep = int(sr * 1.0)
-                if total_frames > samples_to_keep * 5:
+                samples_to_keep = int(native_sr * 1.0)
+                if buffer_pos > samples_to_keep * 5:
                     buffer_pos = 0
 
         except queue.Empty:
-            # Reset VAD buffer after 5s without new audio data
             if vad_pos > 0 and time.time() - vad_buffer_time > 5.0:
                 vad_pos = 0
             continue
         except Exception as e:
             logger.error(f"Loop Error: {e}")
 
-    # Flush remaining buffer on shutdown if enough data
-    sr = runtime_config["sample_rate"]
+    # Flush remaining buffer on shutdown
     min_chunk = runtime_config["min_chunk_duration"]
-    if buffer_pos > 0 and buffer_pos / sr >= min_chunk:
+    if buffer_pos > 0 and buffer_pos / native_sr >= min_chunk:
         full_audio = audio_buffer[:buffer_pos].copy().astype(np.float32)
         if prev_audio.size > 0:
             full_audio = np.concatenate((prev_audio, full_audio))
+        # Resample before sending to model
+        with state.audio_stream_lock:
+            current_resampler = state.resampler
+        full_audio = resample_audio(full_audio, current_resampler)
         target_langs = state.manager.get_unique_languages()
         if target_langs:
             try:

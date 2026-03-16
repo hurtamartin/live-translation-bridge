@@ -75,7 +75,7 @@ def translate_audio(audio_np, target_langs, processor, model, device, dtype, con
                     **inputs,
                     encoder_outputs=encoder_out,
                     tgt_lang=lang,
-                    num_beams=1,
+                    num_beams=config.get("num_beams", 1),
                     max_new_tokens=256,
                 )
                 dec_ms = (time.time() - t_dec) * 1000

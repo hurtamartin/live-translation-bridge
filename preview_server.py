@@ -101,11 +101,12 @@ DEFAULT_CONFIG = {
     "default_target_lang": "ces",
     "preprocess_noise_gate": False,
     "preprocess_noise_gate_threshold": -40.0,
-    "preprocess_normalize": False,
+    "preprocess_normalize": True,
     "preprocess_normalize_target": -3.0,
-    "preprocess_highpass": False,
+    "preprocess_highpass": True,
     "preprocess_highpass_cutoff": 80,
     "preprocess_auto_language": False,
+    "num_beams": 1,
 }
 
 CONFIG_RANGES = {
@@ -118,6 +119,7 @@ CONFIG_RANGES = {
     "preprocess_noise_gate_threshold": (-60.0, -10.0),
     "preprocess_normalize_target": (-20.0, 0.0),
     "preprocess_highpass_cutoff": (20, 300),
+    "num_beams": (1, 5),
 }
 
 def load_config() -> dict:
