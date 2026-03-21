@@ -16,7 +16,7 @@ Real-time speech translation system that captures audio from a microphone, trans
 - **PWA support** — installable on mobile devices, SW update notifications
 - **Dark/Light theme** with auto-detection
 - **GPU acceleration** — CUDA, MPS (Apple Silicon), or CPU fallback
-- **Optimized inference** — greedy decoding, all-language warmup, minimal audio buffer allocations
+- **Optimized inference** — configurable beam search, all-language warmup, minimal audio buffer allocations
 - **Dynamic QR code** — auto-generated from server URL for easy mobile access
 - **Accessibility** — WCAG AA compliant (focus indicators, contrast ratios, ARIA labels, focus traps)
 - **Security** — admin auth, WebSocket auth, rate limiting, CORS, CSP headers, config validation, connection limits
@@ -138,12 +138,25 @@ All parameters can be adjusted at runtime via the admin panel (`/admin`):
 | Min chunk duration | 1.5s | Minimum audio length for translation |
 | Max chunk duration | 12.0s | Force-trigger after this duration |
 | Context overlap | 0.5s | Audio overlap between segments |
+| Beam Search | 1 | Beam search decoding (1–5). Higher = better quality, slower. See below |
 | Noise gate | Off | Silence audio below threshold |
 | Noise gate threshold | -40 dB | Threshold level for noise gate |
-| Normalization | Off | Equalize volume levels |
-| Normalization target | -3 dB | Target level for normalization |
-| High-pass filter | Off | Remove low-frequency rumble |
+| Normalization | **On** | RMS-based volume normalization |
+| Normalization target | -3 dB | Target RMS level for normalization |
+| High-pass filter | **On** | Remove low-frequency rumble (Butterworth 2nd order) |
 | High-pass cutoff | 80 Hz | Cutoff frequency for high-pass filter |
+
+### Beam Search
+
+The **Beam Search** parameter controls the decoding strategy of the translation model. It determines the trade-off between translation speed and quality:
+
+| Value | Strategy | Description |
+|-------|----------|-------------|
+| 1 | Greedy decoding | Picks the most likely token at each step. Fastest, suitable for real-time with low latency |
+| 2–3 | Beam search | Explores multiple candidate sequences in parallel. Good balance of quality and speed |
+| 4–5 | Wide beam search | Best translation quality, but significantly slower — especially on CPU |
+
+Higher values produce more accurate translations because the model considers more possible sentence continuations before choosing the best one. For real-time use, **1–2** is recommended on GPU, **1** on CPU.
 
 ## Supported Languages
 
@@ -159,9 +172,10 @@ All parameters can be adjusted at runtime via the admin panel (`/admin`):
 ## Architecture
 
 ```
-Microphone → sounddevice (native SR) → Resample to 16kHz → Silero VAD
-    → Audio Buffer → SeamlessM4T v2 → Per-language translation
-    → WebSocket → Browser (live subtitles)
+Microphone → sounddevice (native SR) → Audio Buffer (native SR)
+    → VAD (resampled to 16kHz per chunk) → Segment detection
+    → Resample full segment to 16kHz → Preprocessing → SeamlessM4T v2
+    → Per-language translation → WebSocket → Browser (live subtitles)
 ```
 
 - **Backend**: Python, FastAPI, Uvicorn

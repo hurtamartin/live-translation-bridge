@@ -23,6 +23,8 @@ var ADMIN_TRANSLATIONS = {
     minChunkDuration: 'Min. délka úseku',
     maxChunkDuration: 'Max. délka úseku',
     contextOverlap: 'Překryv kontextu',
+    numBeams: 'Paprskové hledání',
+    numBeamsHint: '1 = rychlé, nižší kvalita | 5 = pomalejší, vyšší kvalita překladu',
     defaultTargetLang: 'Výchozí cílový jazyk',
     defaults: 'Výchozí',
     export: 'Export',
@@ -39,7 +41,7 @@ var ADMIN_TRANSLATIONS = {
     highpassHint: 'Ořízne hluboké frekvence pod řečí',
     cutoff: 'Mezní frekvence',
     autoLangDetect: 'Automatická detekce zdrojového jazyka',
-    autoLangHint: 'Model se pokusí detekovat jazyk řeči',
+    autoLangHint: 'Model se pokusí detekovat jazyk řeči (Zatím neimplementováno)',
     performanceTitle: 'Výkon',
     totalTranslations: 'Celkem překladů',
     encoderAvg: 'Enkodér (prům.)',
@@ -118,6 +120,8 @@ var ADMIN_TRANSLATIONS = {
     minChunkDuration: 'Min Chunk Duration',
     maxChunkDuration: 'Max Chunk Duration',
     contextOverlap: 'Context Overlap',
+    numBeams: 'Beam Search',
+    numBeamsHint: '1 = fast, lower quality | 5 = slower, higher translation quality',
     defaultTargetLang: 'Default Target Language',
     defaults: 'Defaults',
     export: 'Export',
@@ -134,7 +138,7 @@ var ADMIN_TRANSLATIONS = {
     highpassHint: 'Cuts low frequencies below speech range',
     cutoff: 'Cutoff',
     autoLangDetect: 'Auto source language detection',
-    autoLangHint: 'Model will try to detect speech language',
+    autoLangHint: 'Model will try to detect speech language (Not yet implemented)',
     performanceTitle: 'Performance',
     totalTranslations: 'Total translations',
     encoderAvg: 'Encoder (avg)',
@@ -276,6 +280,8 @@ var dom = {
   maxChunkDurationVal: document.getElementById('maxChunkDurationVal'),
   contextOverlap: document.getElementById('contextOverlap'),
   contextOverlapVal: document.getElementById('contextOverlapVal'),
+  numBeams: document.getElementById('numBeams'),
+  numBeamsVal: document.getElementById('numBeamsVal'),
   defaultTargetLang: document.getElementById('defaultTargetLang'),
   resetConfig: document.getElementById('resetConfig'),
   exportConfig: document.getElementById('exportConfig'),
@@ -536,6 +542,10 @@ function syncConfigUI(config) {
   dom.maxChunkDurationVal.textContent = config.max_chunk_duration.toFixed(1) + 's';
   dom.contextOverlap.value = config.context_overlap;
   dom.contextOverlapVal.textContent = config.context_overlap.toFixed(1) + 's';
+  if (config.num_beams !== undefined) {
+    dom.numBeams.value = config.num_beams;
+    dom.numBeamsVal.textContent = config.num_beams;
+  }
   dom.defaultTargetLang.value = config.default_target_lang;
   dom.ppAutoLang.checked = config.preprocess_auto_language;
 
@@ -598,8 +608,8 @@ function autoSaveConfig() {
     min_chunk_duration: parseFloat(dom.minChunkDuration.value),
     max_chunk_duration: parseFloat(dom.maxChunkDuration.value),
     context_overlap: parseFloat(dom.contextOverlap.value),
+    num_beams: parseInt(dom.numBeams.value),
     default_target_lang: dom.defaultTargetLang.value,
-    preprocess_auto_language: dom.ppAutoLang.checked,
   };
   postConfig(config, dom.configStatus);
 }
@@ -627,12 +637,13 @@ function resetConfig() {
       min_chunk_duration: 1.5,
       max_chunk_duration: 12.0,
       context_overlap: 0.5,
+      num_beams: 1,
       default_target_lang: 'ces',
       preprocess_noise_gate: false,
       preprocess_noise_gate_threshold: -40.0,
-      preprocess_normalize: false,
+      preprocess_normalize: true,
       preprocess_normalize_target: -3.0,
-      preprocess_highpass: false,
+      preprocess_highpass: true,
       preprocess_highpass_cutoff: 80,
       preprocess_auto_language: false,
     };
@@ -1150,8 +1161,14 @@ function initEvents() {
   bindAutoSlider(dom.maxChunkDuration, dom.maxChunkDurationVal, 's', autoSaveConfig);
   bindAutoSlider(dom.contextOverlap, dom.contextOverlapVal, 's', autoSaveConfig);
 
+  // num_beams — integer slider (no decimal)
+  dom.numBeams.addEventListener('input', function() {
+    dom.numBeamsVal.textContent = dom.numBeams.value;
+  });
+  dom.numBeams.addEventListener('change', autoSaveConfig);
+
   dom.defaultTargetLang.addEventListener('change', autoSaveConfig);
-  dom.ppAutoLang.addEventListener('change', autoSaveConfig);
+  // dom.ppAutoLang — disabled, not yet implemented
   dom.resetConfig.addEventListener('click', resetConfig);
 
   // Export/Import

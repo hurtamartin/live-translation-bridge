@@ -11,6 +11,7 @@ import numpy as np
 import secrets
 import sounddevice as sd
 import torch
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, WebSocket, Request, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -64,7 +65,7 @@ def rate_limit(request: Request):
 from src.translation.engine import MODEL_NAME, translate_audio
 from src.audio.capture import (
     get_audio_devices, restart_audio_stream, compute_audio_level,
-    resample_audio, is_speech,
+    resample_audio,
 )
 import src.state as state
 
@@ -302,6 +303,8 @@ async def api_config_post(request: Request, _user: str = Depends(verify_admin), 
         body = await request.json()
         validated, errors = _validate_config_values(body)
 
+        old_sample_rate = runtime_config.get("sample_rate")
+
         for key, value in validated.items():
             runtime_config[key] = value
 
@@ -310,6 +313,15 @@ async def api_config_post(request: Request, _user: str = Depends(verify_admin), 
 
         save_config()
         logger.info(f"Config updated: {body}")
+
+        # Restart audio stream if sample_rate changed (resampler needs rebuilding)
+        if "sample_rate" in validated and validated["sample_rate"] != old_sample_rate:
+            logger.warning(f"sample_rate changed {old_sample_rate} -> {validated['sample_rate']}, restarting audio stream")
+            try:
+                restart_audio_stream(runtime_config["audio_device_index"], runtime_config["audio_channel"], state)
+            except Exception as e:
+                logger.error(f"Failed to restart audio stream after sample_rate change: {e}")
+
         return JSONResponse(dict(runtime_config))
     except Exception as e:
         logger.error(f"Error updating config: {e}")
@@ -357,14 +369,14 @@ async def health_check():
             gpu_ok = False
 
     if model_ok and thread_ok and audio_ok and gpu_ok:
-        status = "healthy"
+        health_status = "healthy"
     elif model_ok and thread_ok:
-        status = "degraded"
+        health_status = "degraded"
     else:
-        status = "unhealthy"
+        health_status = "unhealthy"
 
     return JSONResponse({
-        "status": status,
+        "status": health_status,
         "uptime": int(time.time() - state.start_time),
         "clients": state.manager.client_count(),
         "audio_stream": "running" if audio_ok else "stopped",
@@ -612,41 +624,85 @@ INFERENCE_TIMEOUT = 30  # seconds — log critical if inference exceeds this
 
 
 def processing_loop(loop):
-    MAX_BUFFER_SAMPLES = state.native_sample_rate * int(runtime_config["max_chunk_duration"] + 5)
+    # Buffer stores audio at NATIVE sample rate (no per-chunk resampling)
+    native_sr = state.native_sample_rate
+    current_max_chunk = runtime_config["max_chunk_duration"]
+    MAX_BUFFER_SAMPLES = native_sr * int(current_max_chunk + 5)
     audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
     buffer_pos = 0
-    prev_audio = np.array([], dtype=np.float32)
+    prev_audio = np.array([], dtype=np.float32)  # stored at native SR
     silence_start = None
     is_speaking = False
     VAD_MIN_SAMPLES = 512
     last_future = None
     last_future_time = 0
+    last_vad_reset = time.time()
+    VAD_RESET_INTERVAL = 300  # reset VAD states every 5 minutes to prevent drift
 
-    # Pre-allocated VAD buffer (numpy) with index pointer — no torch.cat per chunk
-    VAD_BUFFER_MAX = 16000  # ~1s at 16kHz, far more than needed
+    # Pre-allocated VAD buffer at 16kHz (VAD requires 16kHz)
+    VAD_BUFFER_MAX = 16000  # ~1s at 16kHz
     vad_np_buffer = np.zeros(VAD_BUFFER_MAX, dtype=np.float32)
     vad_pos = 0
     vad_buffer_time = time.time()
-    # Pre-allocated tensor for VAD inference (reused every call)
     vad_chunk_tensor = torch.zeros(VAD_MIN_SAMPLES, dtype=torch.float32)
 
-    _level_update_interval = 0.1  # update audio level at most 10x/s
+    _level_update_interval = 0.1
     _last_level_update = 0.0
     _pending_level = -60.0
     _pending_peak = -60.0
+    _last_overflow_warn = 0.0
 
     while not state.stop_event.is_set():
         try:
             chunk = state.audio_queue.get(timeout=0.1)
             chunk_np = np.concatenate(chunk).flatten()
 
-            # Grab resampler reference under lock (restart_audio_stream writes it)
+            # Periodic VAD state reset to prevent RNN drift
+            now_vad_reset = time.time()
+            if now_vad_reset - last_vad_reset > VAD_RESET_INTERVAL:
+                state.vad_model.reset_states()
+                last_vad_reset = now_vad_reset
+                logger.debug("VAD states reset (periodic)")
+
+            # Detect SR change (device switch) — reset buffer
+            current_native_sr = state.native_sample_rate
+            if current_native_sr != native_sr:
+                logger.info(f"Sample rate changed {native_sr} -> {current_native_sr}, resetting buffer")
+                native_sr = current_native_sr
+                current_max_chunk = runtime_config["max_chunk_duration"]
+                MAX_BUFFER_SAMPLES = native_sr * int(current_max_chunk + 5)
+                audio_buffer = np.zeros(MAX_BUFFER_SAMPLES, dtype=np.float32)
+                buffer_pos = 0
+                prev_audio = np.array([], dtype=np.float32)
+                is_speaking = False
+                silence_start = None
+                vad_pos = 0
+                state.vad_model.reset_states()
+                last_vad_reset = now_vad_reset
+
+            # Detect max_chunk_duration change — resize buffer
+            new_max_chunk = runtime_config["max_chunk_duration"]
+            if new_max_chunk != current_max_chunk:
+                logger.info(f"max_chunk_duration changed {current_max_chunk} -> {new_max_chunk}, resizing buffer")
+                current_max_chunk = new_max_chunk
+                new_max_samples = native_sr * int(new_max_chunk + 5)
+                new_buffer = np.zeros(new_max_samples, dtype=np.float32)
+                keep = min(buffer_pos, new_max_samples)
+                if keep > 0:
+                    new_buffer[:keep] = audio_buffer[buffer_pos - keep:buffer_pos]
+                audio_buffer = new_buffer
+                buffer_pos = keep
+                MAX_BUFFER_SAMPLES = new_max_samples
+
+            # Grab resampler for VAD (chunk_np stays at native SR for main buffer)
             with state.audio_stream_lock:
                 current_resampler = state.resampler
-            chunk_np = resample_audio(chunk_np, current_resampler)
 
+            # Resample only for VAD (16kHz required by Silero)
+            chunk_16k = resample_audio(chunk_np, current_resampler)
+
+            # Audio level computed on native SR (RMS/dB is SR-independent)
             level = compute_audio_level(chunk_np)
-            # Track max since last flush (lock-free local vars)
             if level > _pending_level:
                 _pending_level = level
             if level > _pending_peak:
@@ -662,35 +718,39 @@ def processing_loop(loop):
                 _pending_peak = -60.0
                 _last_level_update = now_lvl
 
+            # Store chunk at native SR in main buffer
             n = chunk_np.shape[0]
             if buffer_pos + n <= MAX_BUFFER_SAMPLES:
                 audio_buffer[buffer_pos:buffer_pos + n] = chunk_np
                 buffer_pos += n
+            else:
+                now_overflow = time.time()
+                if now_overflow - _last_overflow_warn > 5.0:
+                    logger.warning(f"Audio buffer overflow: dropping {n} samples (buffer full at {buffer_pos}/{MAX_BUFFER_SAMPLES})")
+                    _last_overflow_warn = now_overflow
 
-            # Append to VAD numpy buffer (no allocation)
-            vad_n = min(n, VAD_BUFFER_MAX - vad_pos)
+            # VAD buffer uses 16kHz resampled data
+            vad_n = min(chunk_16k.shape[0], VAD_BUFFER_MAX - vad_pos)
             if vad_n > 0:
-                vad_np_buffer[vad_pos:vad_pos + vad_n] = chunk_np[:vad_n]
+                vad_np_buffer[vad_pos:vad_pos + vad_n] = chunk_16k[:vad_n]
                 vad_pos += vad_n
             vad_buffer_time = time.time()
             speech_detected = is_speaking
 
-            # Process VAD in 512-sample steps using pointer into pre-allocated buffer
+            # Process VAD in 512-sample steps
             vad_read_pos = 0
             while vad_pos - vad_read_pos >= VAD_MIN_SAMPLES:
                 vad_chunk_tensor.copy_(torch.from_numpy(vad_np_buffer[vad_read_pos:vad_read_pos + VAD_MIN_SAMPLES]))
                 vad_read_pos += VAD_MIN_SAMPLES
-                confidence = state.vad_model(vad_chunk_tensor, runtime_config["sample_rate"]).item()
+                confidence = state.vad_model(vad_chunk_tensor, 16000).item()
                 speech_detected = confidence > 0.5
-            # Shift remaining samples to front (memmove, no allocation)
             remaining = vad_pos - vad_read_pos
             if remaining > 0 and vad_read_pos > 0:
                 vad_np_buffer[:remaining] = vad_np_buffer[vad_read_pos:vad_read_pos + remaining]
             vad_pos = remaining
 
-            sr = runtime_config["sample_rate"]
-            total_frames = buffer_pos
-            total_duration = total_frames / sr
+            # Duration calculations use native SR
+            total_duration = buffer_pos / native_sr
             current_time = time.time()
 
             if speech_detected:
@@ -714,7 +774,7 @@ def processing_loop(loop):
             if should_process and total_duration >= min_chunk:
                 # If translation is paused, discard the chunk
                 if state.translation_paused.is_set():
-                    overlap_samples = int(ctx_overlap * sr)
+                    overlap_samples = int(ctx_overlap * native_sr)
                     if overlap_samples > 0 and buffer_pos > overlap_samples:
                         prev_audio = audio_buffer[buffer_pos - overlap_samples:buffer_pos].copy()
                     else:
@@ -730,16 +790,32 @@ def processing_loop(loop):
                 if prev_audio.size > 0:
                     audio_to_process = np.concatenate((prev_audio, full_audio))
 
+                # Resample entire segment ONCE before sending to model
+                audio_to_process = resample_audio(audio_to_process, current_resampler)
+
                 target_langs = state.manager.get_unique_languages()
                 if target_langs:
                     # Check for stuck inference
                     if last_future is not None and not last_future.done():
                         elapsed = time.time() - last_future_time
                         if elapsed > INFERENCE_TIMEOUT:
-                            logger.critical(f"Inference stuck for {elapsed:.0f}s — skipping new submission")
+                            logger.critical(f"Inference stuck for {elapsed:.0f}s — recreating executor")
                             last_future.cancel()
                             last_future = None
-                            # Skip this chunk
+                            # Force-reset pending counter and recreate executor
+                            # (the old thread may still run but the new executor is usable)
+                            with state.inference_pending_lock:
+                                state.inference_pending = 0
+                            with state._perf_lock:
+                                state._perf_metrics["stuck_inference_count"] += 1
+                            old_executor = state.inference_executor
+                            state.inference_executor = ThreadPoolExecutor(max_workers=1)
+                            old_executor.shutdown(wait=False)
+                            if state.device and state.device.type == "cuda":
+                                try:
+                                    torch.cuda.empty_cache()
+                                except Exception:
+                                    pass
                         else:
                             logger.warning(f"Skipping chunk ({total_duration:.1f}s) — inference busy ({elapsed:.0f}s)")
                     else:
@@ -751,7 +827,8 @@ def processing_loop(loop):
                                 last_future = state.inference_executor.submit(submit_translation, audio_to_process, target_langs, loop)
                                 last_future_time = time.time()
 
-                samples_ctx = int(sr * ctx_overlap)
+                # Context overlap stored at native SR
+                samples_ctx = int(native_sr * ctx_overlap)
                 if full_audio.shape[0] > samples_ctx:
                     prev_audio = full_audio[-samples_ctx:]
                 else:
@@ -761,26 +838,32 @@ def processing_loop(loop):
                 is_speaking = False
                 silence_start = None
 
+                # Reset VAD after each speech segment to prevent state drift
+                state.vad_model.reset_states()
+                last_vad_reset = time.time()
+
             elif not is_speaking and total_duration > min_chunk:
-                samples_to_keep = int(sr * 1.0)
-                if total_frames > samples_to_keep * 5:
+                samples_to_keep = int(native_sr * 1.0)
+                if buffer_pos > samples_to_keep * 5:
                     buffer_pos = 0
 
         except queue.Empty:
-            # Reset VAD buffer after 5s without new audio data
             if vad_pos > 0 and time.time() - vad_buffer_time > 5.0:
                 vad_pos = 0
             continue
         except Exception as e:
             logger.error(f"Loop Error: {e}")
 
-    # Flush remaining buffer on shutdown if enough data
-    sr = runtime_config["sample_rate"]
+    # Flush remaining buffer on shutdown
     min_chunk = runtime_config["min_chunk_duration"]
-    if buffer_pos > 0 and buffer_pos / sr >= min_chunk:
+    if buffer_pos > 0 and buffer_pos / native_sr >= min_chunk:
         full_audio = audio_buffer[:buffer_pos].copy().astype(np.float32)
         if prev_audio.size > 0:
             full_audio = np.concatenate((prev_audio, full_audio))
+        # Resample before sending to model
+        with state.audio_stream_lock:
+            current_resampler = state.resampler
+        full_audio = resample_audio(full_audio, current_resampler)
         target_langs = state.manager.get_unique_languages()
         if target_langs:
             try:

@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.signal import lfilter
+from scipy.signal import butter, sosfilt
 
 
 def preprocess_audio(audio_np: np.ndarray, config: dict) -> np.ndarray:
@@ -14,12 +14,8 @@ def preprocess_audio(audio_np: np.ndarray, config: dict) -> np.ndarray:
     # 1. High-pass filter (remove low rumble below speech frequencies)
     if config["preprocess_highpass"]:
         cutoff = config["preprocess_highpass_cutoff"]
-        rc = 1.0 / (2.0 * np.pi * cutoff)
-        dt = 1.0 / sr
-        alpha = rc / (rc + dt)
-        b = [alpha, -alpha]
-        a = [1.0, -alpha]
-        audio = lfilter(b, a, audio).astype(np.float32)
+        sos = butter(2, cutoff, btype='high', fs=sr, output='sos')
+        audio = sosfilt(sos, audio).astype(np.float32)
 
     # 2. Noise gate (silence audio below threshold) — vectorized
     if config["preprocess_noise_gate"]:
@@ -39,12 +35,12 @@ def preprocess_audio(audio_np: np.ndarray, config: dict) -> np.ndarray:
             if np.sqrt(np.mean(tail ** 2)) < threshold_linear:
                 audio[n_full * frame_size:] = 0.0
 
-    # 3. Normalize volume
+    # 3. Normalize volume (RMS-based for consistent speech level)
     if config["preprocess_normalize"]:
         target_db = config["preprocess_normalize_target"]
-        peak = np.max(np.abs(audio))
-        if peak > 1e-6:  # avoid division by zero on silence
-            current_db = 20.0 * np.log10(peak)
+        rms = np.sqrt(np.mean(audio ** 2))
+        if rms > 1e-6:  # avoid division by zero on silence
+            current_db = 20.0 * np.log10(rms)
             gain_db = target_db - current_db
             gain_linear = 10.0 ** (gain_db / 20.0)
             audio = audio * gain_linear

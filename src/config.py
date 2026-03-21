@@ -15,11 +15,12 @@ DEFAULT_CONFIG = {
     # Audio preprocessing
     "preprocess_noise_gate": False,
     "preprocess_noise_gate_threshold": -40.0,  # dB
-    "preprocess_normalize": False,
+    "preprocess_normalize": True,
     "preprocess_normalize_target": -3.0,  # dB
-    "preprocess_highpass": False,
+    "preprocess_highpass": True,
     "preprocess_highpass_cutoff": 80,  # Hz
     "preprocess_auto_language": False,
+    "num_beams": 1,
 }
 
 CONFIG_FILE = Path(__file__).parent.parent / "config.json"
@@ -60,6 +61,7 @@ CONFIG_RANGES = {
     "preprocess_noise_gate_threshold": (-60.0, -10.0),
     "preprocess_normalize_target": (-20.0, 0.0),
     "preprocess_highpass_cutoff": (20, 300),
+    "num_beams": (1, 5),
 }
 
 
