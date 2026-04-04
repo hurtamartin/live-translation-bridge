@@ -1,4 +1,5 @@
 import time
+from copy import copy
 
 import numpy as np
 import torch
@@ -44,7 +45,7 @@ def warmup_model(processor, model, device, dtype, sample_rate):
     with torch.no_grad():
         encoder_out = model.get_encoder()(**encoder_kwargs)
         for lang in warmup_langs:
-            model.generate(**inputs, encoder_outputs=encoder_out, tgt_lang=lang, num_beams=1, max_new_tokens=16)
+            model.generate(**inputs, encoder_outputs=copy(encoder_out), tgt_lang=lang, num_beams=1, max_new_tokens=16)
     logger.info(f"Warm-up complete ({', '.join(warmup_langs)}).")
 
 
@@ -85,9 +86,10 @@ def translate_audio(audio_np, target_langs, processor, model, device, dtype, con
         for lang in target_langs:
             try:
                 t_dec = time.time()
+                # Use a shallow copy of encoder_out to prevent in-place modification (expansion) by generate()
                 output_tokens = model.generate(
                     **inputs,
-                    encoder_outputs=encoder_out,
+                    encoder_outputs=copy(encoder_out),
                     tgt_lang=lang,
                     num_beams=config.get("num_beams", 1),
                     max_new_tokens=256,
