@@ -496,29 +496,7 @@ body {
 }
 
 .lang-option__flag--eng {
-  background:
-    linear-gradient(35deg, transparent 0 39%, #ffffff 39% 45%, #c8102e 45% 55%, #ffffff 55% 61%, transparent 61% 100%),
-    linear-gradient(145deg, transparent 0 39%, #ffffff 39% 45%, #c8102e 45% 55%, #ffffff 55% 61%, transparent 61% 100%),
-    #012169;
-}
-
-.lang-option__flag--eng::before,
-.lang-option__flag--eng::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-}
-
-.lang-option__flag--eng::before {
-  background:
-    linear-gradient(to bottom, transparent 35%, #ffffff 35% 65%, transparent 65%),
-    linear-gradient(to right, transparent 35%, #ffffff 35% 65%, transparent 65%);
-}
-
-.lang-option__flag--eng::after {
-  background:
-    linear-gradient(to bottom, transparent 43%, #c8102e 43% 57%, transparent 57%),
-    linear-gradient(to right, transparent 43%, #c8102e 43% 57%, transparent 57%);
+  background: #012169 url('/static/assets/flag-gb.svg') center / 100% 100% no-repeat;
 }
 
 .lang-option__flag--rus {
