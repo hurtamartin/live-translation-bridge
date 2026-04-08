@@ -471,8 +471,53 @@ body {
 }
 
 .lang-option__flag {
-  font-size: 28px;
-  line-height: 1;
+  position: relative;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 22px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.lang-option__flag--ces {
+  background: linear-gradient(to bottom, #ffffff 0 50%, #d7141a 50% 100%);
+}
+
+.lang-option__flag--ces::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 55%;
+  background: #11457e;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+.lang-option__flag--eng {
+  background:
+    linear-gradient(to bottom, transparent 40%, #ffffff 40% 60%, transparent 60%),
+    linear-gradient(to right, transparent 40%, #ffffff 40% 60%, transparent 60%),
+    linear-gradient(to bottom, transparent 46%, #c8102e 46% 54%, transparent 54%),
+    linear-gradient(to right, transparent 46%, #c8102e 46% 54%, transparent 54%),
+    #012169;
+}
+
+.lang-option__flag--rus {
+  background: linear-gradient(to bottom, #ffffff 0 33.33%, #0039a6 33.33% 66.66%, #d52b1e 66.66% 100%);
+}
+
+.lang-option__flag--ukr {
+  background: linear-gradient(to bottom, #0057b7 0 50%, #ffd700 50% 100%);
+}
+
+.lang-option__flag--deu {
+  background: linear-gradient(to bottom, #000000 0 33.33%, #dd0000 33.33% 66.66%, #ffce00 66.66% 100%);
+}
+
+.lang-option__flag--spa {
+  background: linear-gradient(to bottom, #aa151b 0 25%, #f1bf00 25% 75%, #aa151b 75% 100%);
 }
 
 .lang-option__name {

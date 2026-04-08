@@ -19,12 +19,12 @@ function safeSetItem(key, value) {
 /* ========== Configuration ========== */
 
 const LANGUAGES = [
-  { code: 'ces', label: 'CZ', flag: '\u{1F1E8}\u{1F1FF}', name: '\u010Ce\u0161tina',   desc: 'Czech' },
-  { code: 'eng', label: 'EN', flag: '\u{1F1EC}\u{1F1E7}', name: 'English',  desc: 'English' },
-  { code: 'rus', label: 'RU', flag: '\u{1F1F7}\u{1F1FA}', name: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439', desc: 'Russian' },
-  { code: 'ukr', label: 'UA', flag: '\u{1F1FA}\u{1F1E6}', name: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', desc: 'Ukrainian' },
-  { code: 'deu', label: 'DE', flag: '\u{1F1E9}\u{1F1EA}', name: 'Deutsch',  desc: 'German' },
-  { code: 'spa', label: 'ES', flag: '\u{1F1EA}\u{1F1F8}', name: 'Español',  desc: 'Spanish' },
+  { code: 'ces', label: 'CZ', name: '\u010Ce\u0161tina', desc: 'Czech' },
+  { code: 'eng', label: 'EN', name: 'English', desc: 'English' },
+  { code: 'rus', label: 'RU', name: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439', desc: 'Russian' },
+  { code: 'ukr', label: 'UA', name: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', desc: 'Ukrainian' },
+  { code: 'deu', label: 'DE', name: 'Deutsch', desc: 'German' },
+  { code: 'spa', label: 'ES', name: 'Español', desc: 'Spanish' },
 ];
 
 const TRANSLATIONS = {
@@ -232,7 +232,7 @@ const dom = {
 /* ========== Helpers ========== */
 
 function getLangInfo(code) {
-  return LANGUAGES.find(function(l) { return l.code === code; }) || { code: code, label: code.toUpperCase(), flag: '', name: code, desc: '' };
+  return LANGUAGES.find(function(l) { return l.code === code; }) || { code: code, label: code.toUpperCase(), name: code, desc: '' };
 }
 
 function t(key) {
@@ -579,9 +579,8 @@ function buildLanguageOptions() {
     btn.setAttribute('aria-label', lang.name + ' (' + lang.desc + ')');
 
     var flagSpan = document.createElement('span');
-    flagSpan.className = 'lang-option__flag';
+    flagSpan.className = 'lang-option__flag lang-option__flag--' + lang.code;
     flagSpan.setAttribute('aria-hidden', 'true');
-    flagSpan.textContent = lang.flag;
 
     var nameSpan = document.createElement('span');
     nameSpan.className = 'lang-option__name';
