@@ -12,6 +12,7 @@ from src.config import get_config_snapshot
 from src.logging_handler import logger
 
 MAX_CLIENTS = int(os.environ.get("MAX_CLIENTS", "200"))
+MAX_CLIENTS_PER_IP = int(os.environ.get("MAX_CLIENTS_PER_IP", "50"))
 CLIENT_QUEUE_SIZE = int(os.environ.get("CLIENT_QUEUE_SIZE", "20"))
 CLIENT_SEND_TIMEOUT = float(os.environ.get("CLIENT_SEND_TIMEOUT", "2.0"))
 
@@ -57,12 +58,20 @@ class SessionManager:
             self._remove_session(session.session_id)
             if should_close:
                 try:
-                    await session.websocket.close(code=1011, reason="WebSocket send failed")
+                    await asyncio.wait_for(
+                        session.websocket.close(code=1011, reason="WebSocket send failed"),
+                        timeout=CLIENT_SEND_TIMEOUT,
+                    )
                 except Exception:
                     pass
 
     async def connect(self, websocket: WebSocket) -> str | None:
         """Accept a new WebSocket client. Returns session_id, or None if limit reached."""
+        session_id, _reason = await self.connect_with_reason(websocket)
+        return session_id
+
+    async def connect_with_reason(self, websocket: WebSocket) -> tuple[str | None, str]:
+        """Accept a new WebSocket client. Returns (session_id, reject_reason)."""
         session_id = str(uuid.uuid4())
         client_ip = ""
         if websocket.client:
@@ -70,12 +79,16 @@ class SessionManager:
         session = ClientSession(session_id=session_id, websocket=websocket, client_ip=client_ip)
         with self._lock:
             if len(self._sessions) >= MAX_CLIENTS:
-                return None
+                return None, "Too many clients"
+            if MAX_CLIENTS_PER_IP > 0 and client_ip:
+                ip_count = sum(1 for s in self._sessions.values() if s.client_ip == client_ip)
+                if ip_count >= MAX_CLIENTS_PER_IP:
+                    return None, "Too many clients from this IP"
             self._sessions[session_id] = session
         try:
             await websocket.accept()
             session.writer_task = asyncio.create_task(self._writer(session))
-            return session_id
+            return session_id, ""
         except Exception:
             self.disconnect(session_id)
             raise
@@ -108,7 +121,10 @@ class SessionManager:
         if task and task is not current_task and not task.done():
             task.cancel()
         try:
-            await session.websocket.close(code=code, reason=reason)
+            await asyncio.wait_for(
+                session.websocket.close(code=code, reason=reason),
+                timeout=CLIENT_SEND_TIMEOUT,
+            )
         except Exception:
             pass
 

@@ -98,12 +98,38 @@ PORT=8888
 | `RATE_LIMIT_MAX` | `10` | Max admin API requests per second per IP |
 | `ALLOW_INSECURE_ADMIN` | *(empty)* | Set to `1` only for local development if you intentionally want to allow `admin/admin` |
 | `ADMIN_WS_TOKEN_TTL` | `3600` | Lifetime in seconds for in-memory admin WebSocket bearer tokens |
+| `ADMIN_WS_TOKEN_MAX` | `1000` | Maximum in-memory admin WebSocket bearer tokens |
 | `TRANSLATION_QUEUE_MAXSIZE` | `100` | Maximum pending translated result batches before dropping newest overflow |
 | `CLIENT_QUEUE_SIZE` | `20` | Maximum pending outbound WebSocket messages per viewer before disconnecting the slow client |
 | `CLIENT_SEND_TIMEOUT` | `2.0` | Per-message viewer WebSocket send timeout in seconds |
 | `WS_SEND_TIMEOUT` | `2.0` | Admin WebSocket send timeout in seconds |
+| `MAX_CLIENTS_PER_IP` | `50` | Maximum concurrent viewer WebSockets from one client IP |
+| `MAX_JSON_BODY_BYTES` | `65536` | Maximum JSON body size for admin mutation APIs |
+| `WS_MAX_SIZE` | `2048` | Uvicorn maximum WebSocket frame size |
+| `LOG_LEVEL` | `INFO` | App logger level |
+| `SHUTDOWN_TRANSLATION_FLUSH` | *(empty)* | Set to `1` to translate final buffered audio on shutdown; leave off for bounded production restarts |
+| `UVICORN_PROXY_HEADERS` | *(empty)* | Set to `1` only behind a trusted reverse proxy |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Trusted proxy IPs for forwarded headers |
 
 > **Note:** Insecure admin credentials such as `admin/admin` and `admin/change-me` are disabled unless `ALLOW_INSECURE_ADMIN=1` is set. Use a real `ADMIN_PASSWORD` before opening the admin panel.
+
+### Production Rollout
+
+This app is designed as a single-node live audio translator: run one process per audio input and model/GPU instance unless you explicitly split audio capture and inference into separate services.
+
+Before going live:
+
+1. Create `config.env` from `config.env.example`, set a strong `ADMIN_PASSWORD`, and keep `ALLOW_INSECURE_ADMIN=0`.
+2. Install dependencies from `requirements.txt` and warm the Hugging Face / Silero caches before the event. Startup should pass without external network access.
+3. Run a full startup with the production audio device, GPU and target network: `python app.py`.
+4. Confirm `/health` returns component states and `/ready` returns HTTP 200 only after model, broadcaster, processing thread, audio stream and GPU checks are healthy.
+5. Run a soak test for at least two hours with expected client count, language mix, reconnects and at least one audio device disconnect/reconnect.
+
+Recommended production defaults are already listed in `config.env.example`. `SHUTDOWN_TRANSLATION_FLUSH=0` is intentional for bounded production restarts; set it to `1` only if preserving the final buffered segment matters more than restart time.
+
+If the app runs behind a trusted reverse proxy, set `UVICORN_PROXY_HEADERS=1` and keep `FORWARDED_ALLOW_IPS` restricted to the proxy IP, for example `127.0.0.1`. The proxy must support WebSocket upgrades for `/ws`, `/api/status/ws`, and `/api/logs`; see `deploy/nginx/live-translation-bridge.conf.example`.
+
+Operational alerts should watch `/ready`, `inference_stuck`, `stuck_inference_count`, queue sizes, GPU memory, and rising drop counters: `audio_queue_drops`, `audio_status_drops`, `audio_buffer_overflows`, `translation_queue_drops`, `ws_messages_dropped`.
 
 ### Preview Server
 

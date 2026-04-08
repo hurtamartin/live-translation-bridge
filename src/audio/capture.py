@@ -1,4 +1,5 @@
 import queue
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -51,8 +52,10 @@ def is_speech(audio_chunk_np: np.ndarray, vad_model, sample_rate: int) -> bool:
 
 def compute_audio_level(audio_np: np.ndarray) -> float:
     """Compute RMS audio level in dB, clamped to -60 dB."""
+    if audio_np.size == 0:
+        return -60.0
     rms = np.sqrt(np.mean(audio_np ** 2))
-    if rms < 1e-10:
+    if not np.isfinite(rms) or rms < 1e-10:
         return -60.0
     db = 20.0 * np.log10(rms)
     return float(max(db, -60.0))
@@ -139,17 +142,32 @@ def restart_audio_stream(device_index, channel, state):
         audio_queue = state.audio_queue
         device_error = state.audio_device_error
         selected_channel = channel
+        last_status_log = 0.0
+
+        def should_drop_for_status(status) -> bool:
+            nonlocal last_status_log
+            if not status:
+                return False
+            if status.input_overflow:
+                state.increment_metric("audio_status_drops")
+                now = time.monotonic()
+                if now - last_status_log >= 5.0:
+                    logger.warning(f"Audio input overflow: {status}")
+                    last_status_log = now
+                return True
+            now = time.monotonic()
+            if now - last_status_log >= 5.0:
+                logger.warning(f"Audio status: {status}")
+                last_status_log = now
+            if status.input_underflow or "error" in str(status).lower():
+                device_error.set()
+                return True
+            return False
 
         def audio_callback(indata, frames, time_info, status):
             try:
-                if status:
-                    logger.warning(f"Audio status: {status}")
-                    if status.input_overflow:
-                        state.increment_metric("audio_status_drops")
-                        return  # drop chunk on overflow, don't signal error
-                    if status.input_underflow or "error" in str(status).lower():
-                        device_error.set()
-                        return
+                if should_drop_for_status(status):
+                    return
                 audio_queue.put_nowait(indata.copy())
             except queue.Full:
                 state.increment_metric("audio_queue_drops")
@@ -160,14 +178,8 @@ def restart_audio_stream(device_index, channel, state):
 
         def multi_channel_callback(indata, frames, time_info, status):
             try:
-                if status:
-                    logger.warning(f"Audio status: {status}")
-                    if status.input_overflow:
-                        state.increment_metric("audio_status_drops")
-                        return
-                    if status.input_underflow or "error" in str(status).lower():
-                        device_error.set()
-                        return
+                if should_drop_for_status(status):
+                    return
                 ch = selected_channel
                 if ch < indata.shape[1]:
                     audio_queue.put_nowait(indata[:, ch:ch+1].copy())

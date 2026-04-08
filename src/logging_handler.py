@@ -8,7 +8,8 @@ import time
 
 
 logger = logging.getLogger("app")
-logger.setLevel(logging.DEBUG)
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logger.setLevel(getattr(logging, _LOG_LEVEL, logging.INFO))
 
 
 class JsonFormatter(logging.Formatter):

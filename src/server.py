@@ -30,6 +30,7 @@ _rate_limit_lock = threading.Lock()
 RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "10"))  # requests per window
 RATE_LIMIT_WINDOW = 1.0  # seconds
 _RATE_LIMIT_MAX_ENTRIES = 5000
+MAX_JSON_BODY_BYTES = int(os.environ.get("MAX_JSON_BODY_BYTES", "65536"))
 
 
 def _check_rate_limit(client_ip: str) -> bool:
@@ -64,6 +65,26 @@ def rate_limit(request: Request):
     client_ip = request.client.host if request.client else "unknown"
     if not _check_rate_limit(client_ip):
         raise HTTPException(status_code=429, detail="Too many requests")
+
+
+async def _read_json_body(request: Request) -> dict:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_JSON_BODY_BYTES:
+                raise HTTPException(status_code=413, detail="Request body too large")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+    body = await request.body()
+    if len(body) > MAX_JSON_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Request body too large")
+    try:
+        data = json.loads(body or b"{}")
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Expected JSON object")
+    return data
 from src.translation.engine import MODEL_NAME, translate_audio
 from src.audio.capture import (
     get_audio_devices, restart_audio_stream, compute_audio_level,
@@ -128,6 +149,7 @@ ALLOW_INSECURE_ADMIN = os.environ.get("ALLOW_INSECURE_ADMIN", "").lower() in {"1
 WEAK_ADMIN_PASSWORDS = {"admin", "password", "change-me", "changeme", "replace-me"}
 INSECURE_ADMIN_CREDENTIALS = ADMIN_PASSWORD.lower() in WEAK_ADMIN_PASSWORDS
 ADMIN_WS_TOKEN_TTL = int(os.environ.get("ADMIN_WS_TOKEN_TTL", "3600"))
+ADMIN_WS_TOKEN_MAX = max(1, int(os.environ.get("ADMIN_WS_TOKEN_MAX", "1000")))
 _admin_ws_tokens: dict[str, float] = {}
 _admin_ws_tokens_lock = threading.Lock()
 
@@ -164,6 +186,8 @@ def _create_admin_ws_token() -> str:
         for t in expired:
             _admin_ws_tokens.pop(t, None)
         _admin_ws_tokens[token] = expires_at
+        while len(_admin_ws_tokens) > ADMIN_WS_TOKEN_MAX:
+            _admin_ws_tokens.pop(next(iter(_admin_ws_tokens)))
     return token
 
 
@@ -284,9 +308,7 @@ async def api_devices(_user: str = Depends(verify_admin), _rl=Depends(rate_limit
 @app.post("/api/devices/select")
 async def api_devices_select(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            return JSONResponse({"error": "Expected JSON object"}, status_code=400)
+        body = await _read_json_body(request)
         device_index = body.get("device_index")
         channel = body.get("channel", 0)
 
@@ -315,6 +337,8 @@ async def api_devices_select(request: Request, _user: str = Depends(verify_admin
         cfg = apply_runtime_config_updates({"audio_device_index": device_index, "audio_channel": channel})
         save_config(cfg)
         return JSONResponse({"ok": True})
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error selecting device: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -390,7 +414,7 @@ def _validate_config_values(body: dict) -> tuple[dict, dict]:
 @app.post("/api/config")
 async def api_config_post(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
-        body = await request.json()
+        body = await _read_json_body(request)
         validated, errors = _validate_config_values(body)
 
         if errors:
@@ -414,6 +438,8 @@ async def api_config_post(request: Request, _user: str = Depends(verify_admin), 
         logger.info(f"Config updated: {body}")
 
         return JSONResponse(new_config)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating config: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -427,7 +453,7 @@ async def api_config_export(_user: str = Depends(verify_admin), _rl=Depends(rate
 @app.post("/api/config/import")
 async def api_config_import(request: Request, _user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     try:
-        body = await request.json()
+        body = await _read_json_body(request)
         validated, errors = _validate_config_values(body)
 
         if errors:
@@ -454,12 +480,13 @@ async def api_config_import(request: Request, _user: str = Depends(verify_admin)
         if errors:
             result["errors"] = errors
         return JSONResponse(result)
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
 
-@app.get("/health")
-async def health_check():
+def _health_payload() -> dict:
     with state.audio_stream_lock:
         audio_ok = state.audio_stream is not None and state.audio_stream.active
     model_ok = state.processor is not None and state.model is not None
@@ -481,7 +508,7 @@ async def health_check():
     else:
         health_status = "unhealthy"
 
-    return JSONResponse({
+    return {
         "status": health_status,
         "uptime": int(time.time() - state.start_time),
         "clients": state.manager.client_count(),
@@ -493,7 +520,18 @@ async def health_check():
         "gpu": "ok" if gpu_ok else "error",
         "admin_auth": "insecure_disabled" if INSECURE_ADMIN_CREDENTIALS and not ALLOW_INSECURE_ADMIN else "configured",
         "queues": state.get_queue_stats(),
-    })
+    }
+
+
+@app.get("/health")
+async def health_check():
+    return JSONResponse(_health_payload())
+
+
+@app.get("/ready")
+async def readiness_check():
+    payload = _health_payload()
+    return JSONResponse(payload, status_code=200 if payload["status"] == "healthy" else 503)
 
 
 _qr_cache = {"url": None, "svg": None}
@@ -699,10 +737,10 @@ async def api_logs_ws(websocket: WebSocket):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    session_id = await state.manager.connect(websocket)
+    session_id, reject_reason = await state.manager.connect_with_reason(websocket)
     if session_id is None:
-        await websocket.close(code=1013, reason="Too many clients")
-        logger.warning("Client rejected: connection limit reached")
+        await websocket.close(code=1013, reason=reject_reason)
+        logger.warning(f"Client rejected: {reject_reason}")
         return
     logger.info(f"Client connected: {session_id[:8]}")
     try:
@@ -768,6 +806,7 @@ def submit_translation(audio_np, target_langs, config_snapshot, loop):
 
 
 INFERENCE_TIMEOUT = 30  # seconds — log critical if inference exceeds this
+SHUTDOWN_TRANSLATION_FLUSH = os.environ.get("SHUTDOWN_TRANSLATION_FLUSH", "").lower() in {"1", "true", "yes"}
 
 
 def processing_loop(loop):
@@ -1009,6 +1048,11 @@ def processing_loop(loop):
             logger.error(f"Loop Error: {e}")
 
     # Flush remaining buffer on shutdown
+    if not SHUTDOWN_TRANSLATION_FLUSH:
+        if buffer_pos > 0:
+            logger.info("Dropping buffered audio on shutdown; set SHUTDOWN_TRANSLATION_FLUSH=1 to translate final buffered segment")
+        return
+
     config_snapshot = get_config_snapshot()
     min_chunk = config_snapshot["min_chunk_duration"]
     if buffer_pos > 0 and buffer_pos / native_sr >= min_chunk:
@@ -1039,7 +1083,7 @@ async def broadcaster():
         try:
             tasks = []
             for lang, text in results.items():
-                logger.info(f"[{lang}] {text}")
+                logger.debug(f"Broadcasting translation for {lang} ({len(text)} chars)")
                 tasks.append(state.manager.send_to_language(lang, text))
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=False)
@@ -1183,5 +1227,18 @@ def start_server():
 
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "8888"))
+    ws_max_size = int(os.environ.get("WS_MAX_SIZE", "2048"))
+    timeout_keep_alive = int(os.environ.get("UVICORN_TIMEOUT_KEEP_ALIVE", "5"))
+    proxy_headers = os.environ.get("UVICORN_PROXY_HEADERS", "").lower() in {"1", "true", "yes"}
+    forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1")
     logger.info(f"Starting Web Server on {host}:{port}...")
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        ws_max_size=ws_max_size,
+        timeout_keep_alive=timeout_keep_alive,
+        proxy_headers=proxy_headers,
+        forwarded_allow_ips=forwarded_allow_ips,
+    )
