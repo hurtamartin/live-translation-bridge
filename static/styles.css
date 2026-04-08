@@ -497,11 +497,28 @@ body {
 
 .lang-option__flag--eng {
   background:
-    linear-gradient(to bottom, transparent 40%, #ffffff 40% 60%, transparent 60%),
-    linear-gradient(to right, transparent 40%, #ffffff 40% 60%, transparent 60%),
-    linear-gradient(to bottom, transparent 46%, #c8102e 46% 54%, transparent 54%),
-    linear-gradient(to right, transparent 46%, #c8102e 46% 54%, transparent 54%),
+    linear-gradient(35deg, transparent 0 39%, #ffffff 39% 45%, #c8102e 45% 55%, #ffffff 55% 61%, transparent 61% 100%),
+    linear-gradient(145deg, transparent 0 39%, #ffffff 39% 45%, #c8102e 45% 55%, #ffffff 55% 61%, transparent 61% 100%),
     #012169;
+}
+
+.lang-option__flag--eng::before,
+.lang-option__flag--eng::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.lang-option__flag--eng::before {
+  background:
+    linear-gradient(to bottom, transparent 35%, #ffffff 35% 65%, transparent 65%),
+    linear-gradient(to right, transparent 35%, #ffffff 35% 65%, transparent 65%);
+}
+
+.lang-option__flag--eng::after {
+  background:
+    linear-gradient(to bottom, transparent 43%, #c8102e 43% 57%, transparent 57%),
+    linear-gradient(to right, transparent 43%, #c8102e 43% 57%, transparent 57%);
 }
 
 .lang-option__flag--rus {
