@@ -1,13 +1,14 @@
 /* Service Worker - caches static assets for offline shell */
 'use strict';
 
-const CACHE_NAME = 'live-preklad-v3';
+const CACHE_NAME = 'live-preklad-v4';
 const STATIC_ASSETS = [
   '/',
   '/static/styles.css',
   '/static/app.js',
   '/static/manifest.json',
   '/static/assets/favicon.svg',
+  '/static/assets/qr-placeholder.svg',
   '/static/admin.css',
   '/static/admin.js',
 ];

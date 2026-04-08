@@ -227,6 +227,7 @@ var adminState = {
   devicesCache: [],
   audioHistoryData: [],
   confirmCallback: null,
+  confirmPreviousFocus: null,
   saveDebounceTimer: null,
   ppSaveTimer: null,
   lang: localStorage.getItem('adminLang') || 'cs',
@@ -362,6 +363,8 @@ function toggleTheme() {
 function showToast(message, type) {
   var toast = document.createElement('div');
   toast.className = 'toast toast--' + (type || 'info');
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
   toast.textContent = message;
   dom.toastContainer.appendChild(toast);
   toast.offsetHeight;
@@ -374,15 +377,46 @@ function showToast(message, type) {
 
 /* ========== Confirm Dialog ========== */
 
+function getFocusableElements(container) {
+  return container.querySelectorAll(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  );
+}
+
 function showConfirm(text, callback) {
   dom.confirmText.textContent = text;
   adminState.confirmCallback = callback;
+  adminState.confirmPreviousFocus = document.activeElement;
   dom.confirmOverlay.classList.add('confirm-overlay--open');
+  dom.confirmOverlay.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(function() {
+    dom.confirmCancel.focus();
+  });
 }
 
 function hideConfirm() {
   dom.confirmOverlay.classList.remove('confirm-overlay--open');
+  dom.confirmOverlay.setAttribute('aria-hidden', 'true');
   adminState.confirmCallback = null;
+  if (adminState.confirmPreviousFocus) {
+    adminState.confirmPreviousFocus.focus();
+    adminState.confirmPreviousFocus = null;
+  }
+}
+
+function trapConfirmFocus(e) {
+  if (e.key !== 'Tab' || !dom.confirmOverlay.classList.contains('confirm-overlay--open')) return;
+  var focusableEls = getFocusableElements(dom.confirmOverlay);
+  if (focusableEls.length === 0) return;
+  var first = focusableEls[0];
+  var last = focusableEls[focusableEls.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
 }
 
 /* ========== Auto-save helpers ========== */
@@ -435,10 +469,16 @@ function formatUptime(seconds) {
 
 function setDot(el, status) {
   el.className = 'status-item__dot';
+  var item = el.closest('.status-item');
+  if (item) {
+    item.classList.remove('status-item--running', 'status-item--stopped');
+  }
   if (status === 'running') {
     el.classList.add('status-item__dot--running');
+    if (item) item.classList.add('status-item--running');
   } else {
     el.classList.add('status-item__dot--stopped');
+    if (item) item.classList.add('status-item--stopped');
   }
 }
 
@@ -848,6 +888,12 @@ function fetchAudioHistory() {
 function drawAudioHistory() {
   var canvas = dom.audioHistoryCanvas;
   if (!canvas) return;
+  var cssWidth = Math.max(1, Math.floor(canvas.clientWidth || canvas.width || 800));
+  var cssHeight = Math.max(1, Math.floor(canvas.clientHeight || 80));
+  if (canvas.width !== cssWidth || canvas.height !== cssHeight) {
+    canvas.width = cssWidth;
+    canvas.height = cssHeight;
+  }
   var ctx = canvas.getContext('2d');
   var w = canvas.width;
   var h = canvas.height;
@@ -938,10 +984,15 @@ function fetchMetrics() {
 
 /* ========== Sessions ========== */
 
+var _lastSessionsHash = '';
+
 function fetchSessions() {
   fetch('/api/sessions')
     .then(function(r) { return r.json(); })
     .then(function(sessions) {
+      var hash = adminState.lang + ':' + JSON.stringify(sessions);
+      if (hash === _lastSessionsHash) return;
+      _lastSessionsHash = hash;
       if (sessions.length === 0) {
         dom.sessionsBody.innerHTML = '';
         var emptyTr = document.createElement('tr');
@@ -973,10 +1024,15 @@ function fetchSessions() {
 
 /* ========== Translation History ========== */
 
+var _lastTranslationsHash = '';
+
 function fetchTranslations() {
   fetch('/api/translations')
     .then(function(r) { return r.json(); })
     .then(function(entries) {
+      var hash = adminState.lang + ':' + JSON.stringify(entries);
+      if (hash === _lastTranslationsHash) return;
+      _lastTranslationsHash = hash;
       if (entries.length === 0) {
         dom.translationHistory.innerHTML = '';
         var emptyDiv = document.createElement('div');
@@ -986,7 +1042,7 @@ function fetchTranslations() {
         return;
       }
       dom.translationHistory.innerHTML = '';
-      entries.reverse().forEach(function(entry) {
+      entries.slice().reverse().forEach(function(entry) {
         var el = document.createElement('div');
         el.className = 'translation-entry';
         var timeSpan = document.createElement('span');
@@ -1138,6 +1194,8 @@ function initEvents() {
       adminState.lang = dom.adminLangSelect.value;
       localStorage.setItem('adminLang', adminState.lang);
       updateAdminUI();
+      fetchSessions();
+      fetchTranslations();
     });
   }
 
@@ -1247,6 +1305,7 @@ function initEvents() {
     if (e.target === dom.confirmOverlay) hideConfirm();
   });
   document.addEventListener('keydown', function(e) {
+    trapConfirmFocus(e);
     if (e.key === 'Escape' && dom.confirmOverlay.classList.contains('confirm-overlay--open')) {
       hideConfirm();
     }
