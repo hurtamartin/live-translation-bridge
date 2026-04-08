@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 
 from src.logging_handler import logger
@@ -26,6 +27,13 @@ DEFAULT_CONFIG = {
 CONFIG_FILE = Path(__file__).parent.parent / "config.json"
 
 SUPPORTED_LANGUAGES = {"ces", "eng", "rus", "ukr", "deu", "spa"}
+FIXED_CONFIG_VALUES = {
+    # The audio pipeline, Silero VAD and SeamlessM4T inference path are wired
+    # around 16 kHz model audio. Device native sample rate is handled separately.
+    "sample_rate": 16000,
+}
+
+runtime_config_lock = threading.RLock()
 
 def load_config() -> dict:
     """Load config from JSON file, falling back to defaults."""
@@ -42,11 +50,16 @@ def load_config() -> dict:
             logger.warning(f"Failed to load config: {e}, using defaults")
     return config
 
-def save_config():
+def save_config(config_snapshot: dict | None = None):
     """Save current runtime_config to JSON file."""
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(runtime_config, f, indent=2, ensure_ascii=False)
+        if config_snapshot is None:
+            with runtime_config_lock:
+                config_snapshot = dict(runtime_config)
+        tmp_file = CONFIG_FILE.with_suffix(CONFIG_FILE.suffix + ".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(config_snapshot, f, indent=2, ensure_ascii=False)
+        tmp_file.replace(CONFIG_FILE)
     except Exception as e:
         logger.error(f"Failed to save config: {e}")
 
@@ -67,6 +80,11 @@ CONFIG_RANGES = {
 
 def _validate_loaded_config(config: dict) -> dict:
     """Validate config values against CONFIG_RANGES, reset out-of-range to defaults."""
+    for key, fixed_value in FIXED_CONFIG_VALUES.items():
+        if config.get(key) != fixed_value:
+            logger.warning(f"Config '{key}' forced to {fixed_value}; runtime sample-rate changes are not supported")
+            config[key] = fixed_value
+
     for key, (min_val, max_val) in CONFIG_RANGES.items():
         if key in config and config[key] is not None:
             try:
@@ -87,7 +105,28 @@ def _validate_loaded_config(config: dict) -> dict:
             elif not isinstance(value, expected_type):
                 logger.warning(f"Config '{key}' wrong type ({type(value).__name__}), reset to default {DEFAULT_CONFIG[key]}")
                 config[key] = DEFAULT_CONFIG[key]
+
+    if config["min_chunk_duration"] > config["max_chunk_duration"]:
+        logger.warning("Config min_chunk_duration > max_chunk_duration, resetting both to defaults")
+        config["min_chunk_duration"] = DEFAULT_CONFIG["min_chunk_duration"]
+        config["max_chunk_duration"] = DEFAULT_CONFIG["max_chunk_duration"]
+    if config["context_overlap"] >= config["min_chunk_duration"]:
+        logger.warning("Config context_overlap must be smaller than min_chunk_duration, resetting to default")
+        config["context_overlap"] = DEFAULT_CONFIG["context_overlap"]
     return config
 
 
 runtime_config = _validate_loaded_config(load_config())
+
+
+def get_config_snapshot() -> dict:
+    """Return a consistent copy of the current runtime configuration."""
+    with runtime_config_lock:
+        return dict(runtime_config)
+
+
+def apply_runtime_config_updates(updates: dict) -> dict:
+    """Atomically apply validated runtime config updates and return a snapshot."""
+    with runtime_config_lock:
+        runtime_config.update(updates)
+        return dict(runtime_config)

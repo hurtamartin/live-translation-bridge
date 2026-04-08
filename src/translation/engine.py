@@ -42,7 +42,7 @@ def warmup_model(processor, model, device, dtype, sample_rate):
     inputs = {k: v.to(device=device, dtype=dtype) if v.dtype.is_floating_point else v.to(device=device)
               for k, v in inputs.items()}
     encoder_kwargs = {k: v for k, v in inputs.items() if k in ('input_features', 'attention_mask')}
-    with torch.no_grad():
+    with torch.inference_mode():
         encoder_out = model.get_encoder()(**encoder_kwargs)
         for lang in warmup_langs:
             model.generate(**inputs, encoder_outputs=copy(encoder_out), tgt_lang=lang, num_beams=1, max_new_tokens=16)
@@ -68,7 +68,7 @@ def translate_audio(audio_np, target_langs, processor, model, device, dtype, con
     # Run encoder once, reuse for all target languages
     encoder_kwargs = {k: v for k, v in inputs.items() if k in ('input_features', 'attention_mask')}
     results = {}
-    with torch.no_grad():
+    with torch.inference_mode():
         try:
             t_enc = time.time()
             encoder_out = model.get_encoder()(**encoder_kwargs)

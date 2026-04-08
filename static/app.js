@@ -225,6 +225,7 @@ const dom = {
   showQrLink: document.getElementById('showQrLink'),
   qrOverlay: document.getElementById('qrOverlay'),
   qrClose: document.getElementById('qrClose'),
+  pageUrl: document.getElementById('pageUrl'),
   header: document.getElementById('header'),
 };
 
@@ -891,6 +892,9 @@ function init() {
   setupAutoHide();
   setupOfflineDetection();
   registerServiceWorker();
+  if (dom.pageUrl) {
+    dom.pageUrl.textContent = window.location.origin;
+  }
   connect();
 
   // QR image fallback (moved from inline onerror for CSP compliance)

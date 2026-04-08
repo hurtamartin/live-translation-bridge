@@ -77,11 +77,11 @@ The server starts on `http://0.0.0.0:8888` by default (configurable via `config.
 
 ### Environment Variables
 
-Create a `config.env` file in the project root (or set system environment variables):
+Create a `config.env` file in the project root (you can copy `config.env.example`) or set system environment variables:
 
 ```env
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin
+ADMIN_PASSWORD=change-me
 HOST=0.0.0.0
 PORT=8888
 ```
@@ -96,8 +96,14 @@ PORT=8888
 | `PORT` | `8888` | Server port |
 | `LOG_FORMAT` | *(empty — human-readable)* | Set to `json` for structured JSON logging |
 | `RATE_LIMIT_MAX` | `10` | Max admin API requests per second per IP |
+| `ALLOW_INSECURE_ADMIN` | *(empty)* | Set to `1` only for local development if you intentionally want to allow `admin/admin` |
+| `ADMIN_WS_TOKEN_TTL` | `3600` | Lifetime in seconds for in-memory admin WebSocket bearer tokens |
+| `TRANSLATION_QUEUE_MAXSIZE` | `100` | Maximum pending translated result batches before dropping newest overflow |
+| `CLIENT_QUEUE_SIZE` | `20` | Maximum pending outbound WebSocket messages per viewer before disconnecting the slow client |
+| `CLIENT_SEND_TIMEOUT` | `2.0` | Per-message viewer WebSocket send timeout in seconds |
+| `WS_SEND_TIMEOUT` | `2.0` | Admin WebSocket send timeout in seconds |
 
-> **Note:** A warning is logged at startup if default credentials are used.
+> **Note:** Insecure admin credentials such as `admin/admin` and `admin/change-me` are disabled unless `ALLOW_INSECURE_ADMIN=1` is set. Use a real `ADMIN_PASSWORD` before opening the admin panel.
 
 ### Preview Server
 

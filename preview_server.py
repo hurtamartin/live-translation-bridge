@@ -183,6 +183,7 @@ _perf_metrics = {
 }
 
 _translation_history: collections.deque = collections.deque(maxlen=50)
+_translation_paused = False
 
 def _update_audio_history():
     global _audio_level_db, _audio_level_peak
@@ -190,9 +191,9 @@ def _update_audio_history():
     _audio_level_db = -30 + 15 * math.sin(time.time() * 0.5) + random.uniform(-3, 3)
     _audio_level_peak = max(_audio_level_peak - 0.5, _audio_level_db)
     _audio_history.append({
-        "time": time.time(),
-        "rms_db": round(_audio_level_db, 1),
-        "peak_db": round(_audio_level_peak, 1),
+        "t": time.time(),
+        "db": round(_audio_level_db, 1),
+        "peak": round(_audio_level_peak, 1),
     })
 
 # --- Demo data ---
@@ -394,6 +395,7 @@ async def api_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)
             "audio_stream": {"status": "running", "device_name": "Preview (mock)", "channel": 0},
             "inference_executor": {"status": "running", "pending_tasks": 0},
         },
+        "translation_paused": _translation_paused,
         "config": dict(runtime_config),
     })
 
@@ -550,6 +552,18 @@ async def api_metrics(_user: str = Depends(verify_admin), _rl=Depends(rate_limit
 async def api_translations(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     return JSONResponse(list(_translation_history))
 
+
+@app.post("/api/translation/toggle")
+async def api_translation_toggle(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
+    global _translation_paused
+    _translation_paused = not _translation_paused
+    return JSONResponse({"ok": True, "paused": _translation_paused})
+
+
+@app.get("/api/translation/status")
+async def api_translation_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
+    return JSONResponse({"paused": _translation_paused})
+
 # --- Audio history ---
 
 @app.get("/api/audio-history")
@@ -584,6 +598,7 @@ async def api_status_ws(websocket: WebSocket):
                     "audio_stream": {"status": "running", "device_name": "Preview (mock)", "channel": 0},
                     "inference_executor": {"status": "running", "pending_tasks": 0},
                 },
+                "translation_paused": _translation_paused,
             }
             await websocket.send_text(json.dumps(payload))
             await asyncio.sleep(1)
@@ -662,6 +677,9 @@ async def demo_subtitles():
     idx = 0
     await asyncio.sleep(3)
     while True:
+        if _translation_paused:
+            await asyncio.sleep(1)
+            continue
         lang_sessions: dict[str, list[ClientSession]] = {}
         for s in list(sessions.values()):
             lang_sessions.setdefault(s.target_lang, []).append(s)
@@ -685,7 +703,7 @@ async def demo_subtitles():
             for lang in lang_sessions:
                 demos = DEMOS.get(lang, DEMOS["ces"])
                 _translation_history.appendleft({
-                    "timestamp": time.time(),
+                    "time": time.strftime("%H:%M:%S"),
                     "translations": {lang: demos[idx % len(demos)]},
                 })
 

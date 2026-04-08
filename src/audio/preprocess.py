@@ -1,5 +1,12 @@
+from functools import lru_cache
+
 import numpy as np
 from scipy.signal import butter, sosfilt
+
+
+@lru_cache(maxsize=32)
+def _highpass_sos(cutoff: int, sr: int):
+    return butter(2, cutoff, btype='high', fs=sr, output='sos')
 
 
 def preprocess_audio(audio_np: np.ndarray, config: dict) -> np.ndarray:
@@ -14,7 +21,7 @@ def preprocess_audio(audio_np: np.ndarray, config: dict) -> np.ndarray:
     # 1. High-pass filter (remove low rumble below speech frequencies)
     if config["preprocess_highpass"]:
         cutoff = config["preprocess_highpass_cutoff"]
-        sos = butter(2, cutoff, btype='high', fs=sr, output='sos')
+        sos = _highpass_sos(int(cutoff), int(sr))
         audio = sosfilt(sos, audio).astype(np.float32)
 
     # 2. Noise gate (silence audio below threshold) — vectorized
