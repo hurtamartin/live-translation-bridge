@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#0a0a0f" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f8f9fc" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#eef3f8" media="(prefers-color-scheme: light)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Live Překlad</title>
@@ -15,8 +15,8 @@
 <body>
   <!-- Header -->
   <header class="header" id="header">
-    <button class="header__btn" id="themeToggle" aria-label="Toggle theme">
-      <span class="header__icon" id="themeIcon">&#9790;</span>
+    <button class="header__btn" id="themeToggle" type="button" aria-label="Přepnout motiv">
+      <span class="header__icon" id="themeIcon" aria-hidden="true">&#9790;</span>
     </button>
 
     <div class="header__status" id="statusIndicator" role="status" aria-live="polite">
@@ -24,8 +24,8 @@
       <span class="status__text" id="statusText"></span>
     </div>
 
-    <button class="header__btn" id="settingsToggle" aria-label="Settings">
-      <span class="header__icon">&#9881;</span>
+    <button class="header__btn" id="settingsToggle" type="button" aria-label="Nastavení">
+      <span class="header__icon" aria-hidden="true">&#9881;</span>
     </button>
   </header>
 
@@ -38,25 +38,25 @@
   </main>
 
   <!-- Language selector FAB -->
-  <button class="fab" id="langFab" aria-label="Change language">
-    <span class="fab__icon">&#127760;</span>
+  <button class="fab" id="langFab" type="button" aria-label="Změnit jazyk">
+    <span class="fab__icon" aria-hidden="true">&#127760;</span>
     <span class="fab__label" id="fabLabel">CZ</span>
   </button>
 
   <!-- Language modal (options built dynamically in app.js) -->
-  <div class="modal-overlay" id="langModal" aria-modal="true">
-    <div class="modal" role="dialog" aria-labelledby="langModalTitle">
+  <div class="modal-overlay" id="langModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="langModalTitle">
       <h2 class="modal__title" id="langModalTitle" data-i18n="selectLanguage"></h2>
       <div class="modal__options" id="langOptions">
         <!-- Populated by app.js from LANGUAGES config -->
       </div>
-      <button class="modal__close" id="langModalClose" data-i18n="close"></button>
+      <button class="modal__close" id="langModalClose" type="button" data-i18n="close"></button>
     </div>
   </div>
 
   <!-- Settings drawer -->
-  <div class="modal-overlay" id="settingsModal" aria-modal="true">
-    <div class="modal modal--settings" role="dialog" aria-labelledby="settingsModalTitle">
+  <div class="modal-overlay" id="settingsModal" aria-hidden="true">
+    <div class="modal modal--settings" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
       <h2 class="modal__title" id="settingsModalTitle" data-i18n="settings"></h2>
 
       <div class="setting">
@@ -85,27 +85,23 @@
         <a href="#qr" class="setting__link" id="showQrLink" data-i18n="showQrCode"></a>
       </div>
 
-      <button class="modal__close" id="settingsModalClose" data-i18n="close"></button>
+      <button class="modal__close" id="settingsModalClose" type="button" data-i18n="close"></button>
     </div>
   </div>
 
   <!-- QR page overlay -->
-  <div class="qr-overlay" id="qrOverlay">
-    <div class="qr-page">
-      <h1 class="qr-page__title" data-i18n="qrPageTitle"></h1>
+  <div class="qr-overlay" id="qrOverlay" aria-hidden="true">
+    <div class="qr-page" role="dialog" aria-modal="true" aria-labelledby="qrPageTitle">
+      <h1 class="qr-page__title" id="qrPageTitle" data-i18n="qrPageTitle"></h1>
       <div class="qr-page__code">
-        <img src="/api/qr.svg" alt="QR Code" id="qrImage">
+        <img src="/api/qr.svg" alt="QR kód" id="qrImage">
       </div>
       <p class="qr-page__instruction" data-i18n="qrInstruction"></p>
       <p class="qr-page__url" id="pageUrl"></p>
-      <button class="qr-page__close" id="qrClose" data-i18n="close"></button>
+      <button class="qr-page__close" id="qrClose" type="button" data-i18n="close"></button>
     </div>
   </div>
 
-  <script>
-    // Show the current page URL in QR section
-    document.getElementById('pageUrl').textContent = window.location.origin;
-  </script>
   <script src="/static/app.js"></script>
 </body>
 </html>

@@ -1,4 +1,5 @@
 import queue
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -6,7 +7,7 @@ import torch
 import torchaudio
 
 from src.logging_handler import logger
-from src.config import runtime_config
+from src.config import get_config_snapshot
 
 
 def detect_device():
@@ -35,6 +36,7 @@ def load_vad():
         model='silero_vad',
         trust_repo=True
     )
+    vad_model.eval()
     logger.info("Silero VAD loaded.")
     return vad_model, vad_utils
 
@@ -50,8 +52,10 @@ def is_speech(audio_chunk_np: np.ndarray, vad_model, sample_rate: int) -> bool:
 
 def compute_audio_level(audio_np: np.ndarray) -> float:
     """Compute RMS audio level in dB, clamped to -60 dB."""
+    if audio_np.size == 0:
+        return -60.0
     rms = np.sqrt(np.mean(audio_np ** 2))
-    if rms < 1e-10:
+    if not np.isfinite(rms) or rms < 1e-10:
         return -60.0
     db = 20.0 * np.log10(rms)
     return float(max(db, -60.0))
@@ -67,7 +71,8 @@ def resample_audio(audio_np: np.ndarray, resampler_obj) -> np.ndarray:
     if resampler_obj is None:
         return audio_np
     tensor = torch.from_numpy(audio_np).float().unsqueeze(0)
-    resampled = resampler_obj(tensor)
+    with torch.inference_mode():
+        resampled = resampler_obj(tensor)
     return resampled.squeeze(0).numpy()
 
 
@@ -116,12 +121,14 @@ def restart_audio_stream(device_index, channel, state):
         else:
             dev_info = sd.query_devices(kind='input')
             native_sr = int(dev_info['default_samplerate'])
+            max_ch = dev_info['max_input_channels']
             channels_to_open = 1
 
         state.native_sample_rate = native_sr
 
         # Create resampler if needed (native -> 16kHz)
-        target_sr = runtime_config["sample_rate"]
+        cfg = get_config_snapshot()
+        target_sr = cfg["sample_rate"]
         state.resampler = create_resampler(native_sr, target_sr)
         if state.resampler is not None:
             logger.info(f"Resampling active: {native_sr} Hz -> {target_sr} Hz")
@@ -134,18 +141,36 @@ def restart_audio_stream(device_index, channel, state):
 
         audio_queue = state.audio_queue
         device_error = state.audio_device_error
+        selected_channel = channel
+        last_status_log = 0.0
+
+        def should_drop_for_status(status) -> bool:
+            nonlocal last_status_log
+            if not status:
+                return False
+            if status.input_overflow:
+                state.increment_metric("audio_status_drops")
+                now = time.monotonic()
+                if now - last_status_log >= 5.0:
+                    logger.warning(f"Audio input overflow: {status}")
+                    last_status_log = now
+                return True
+            now = time.monotonic()
+            if now - last_status_log >= 5.0:
+                logger.warning(f"Audio status: {status}")
+                last_status_log = now
+            if status.input_underflow or "error" in str(status).lower():
+                device_error.set()
+                return True
+            return False
 
         def audio_callback(indata, frames, time_info, status):
             try:
-                if status:
-                    logger.warning(f"Audio status: {status}")
-                    if status.input_overflow:
-                        return  # drop chunk on overflow, don't signal error
-                    if status.input_underflow or "error" in str(status).lower():
-                        device_error.set()
-                        return
+                if should_drop_for_status(status):
+                    return
                 audio_queue.put_nowait(indata.copy())
             except queue.Full:
+                state.increment_metric("audio_queue_drops")
                 pass  # drop chunk if queue full — better than blocking callback
             except Exception as e:
                 logger.error(f"Audio callback error: {e}")
@@ -153,19 +178,15 @@ def restart_audio_stream(device_index, channel, state):
 
         def multi_channel_callback(indata, frames, time_info, status):
             try:
-                if status:
-                    logger.warning(f"Audio status: {status}")
-                    if status.input_overflow:
-                        return
-                    if status.input_underflow or "error" in str(status).lower():
-                        device_error.set()
-                        return
-                ch = runtime_config["audio_channel"]
+                if should_drop_for_status(status):
+                    return
+                ch = selected_channel
                 if ch < indata.shape[1]:
                     audio_queue.put_nowait(indata[:, ch:ch+1].copy())
                 else:
                     audio_queue.put_nowait(indata[:, 0:1].copy())
             except queue.Full:
+                state.increment_metric("audio_queue_drops")
                 pass
             except Exception as e:
                 logger.error(f"Audio callback error: {e}")

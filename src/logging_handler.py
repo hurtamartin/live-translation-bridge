@@ -3,13 +3,13 @@ import collections
 import json as _json
 import logging
 import os
-import queue as _queue
 import threading
 import time
 
 
 logger = logging.getLogger("app")
-logger.setLevel(logging.DEBUG)
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logger.setLevel(getattr(logging, _LOG_LEVEL, logging.INFO))
 
 
 class JsonFormatter(logging.Formatter):
@@ -25,24 +25,41 @@ class JsonFormatter(logging.Formatter):
         }, ensure_ascii=False)
 
 
-class _ThreadSafeLogQueue:
-    """Wrapper that bridges thread-safe queue.Queue to async consumption."""
+class _AsyncLogQueue:
+    """Thread-safe bridge from logging threads into an asyncio.Queue listener."""
+
     def __init__(self, maxsize=100):
-        self._q = _queue.Queue(maxsize=maxsize)
+        self._loop = asyncio.get_running_loop()
+        self._q = asyncio.Queue(maxsize=maxsize)
+        self._closed = False
 
     def put_nowait(self, item):
+        if self._closed:
+            return
+
+        def _put():
+            if self._closed:
+                return
+            if self._q.full():
+                try:
+                    self._q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                self._q.put_nowait(item)
+            except asyncio.QueueFull:
+                pass
+
         try:
-            self._q.put_nowait(item)
-        except _queue.Full:
-            pass
+            self._loop.call_soon_threadsafe(_put)
+        except RuntimeError:
+            self._closed = True
 
     async def get(self):
-        loop = asyncio.get_running_loop()
-        while True:
-            try:
-                return await loop.run_in_executor(None, lambda: self._q.get(timeout=1.0))
-            except _queue.Empty:
-                continue
+        return await self._q.get()
+
+    def close(self):
+        self._closed = True
 
 
 class LogBufferHandler(logging.Handler):
@@ -50,7 +67,7 @@ class LogBufferHandler(logging.Handler):
     def __init__(self, maxlen=500):
         super().__init__()
         self.buffer = collections.deque(maxlen=maxlen)
-        self.listeners: list[_ThreadSafeLogQueue] = []
+        self.listeners: list[_AsyncLogQueue] = []
         self._lock = threading.Lock()
 
     def emit(self, record):
@@ -64,13 +81,14 @@ class LogBufferHandler(logging.Handler):
             for q in self.listeners:
                 q.put_nowait(entry)
 
-    def add_listener(self) -> "_ThreadSafeLogQueue":
-        q = _ThreadSafeLogQueue(maxsize=100)
+    def add_listener(self) -> "_AsyncLogQueue":
+        q = _AsyncLogQueue(maxsize=100)
         with self._lock:
             self.listeners.append(q)
         return q
 
-    def remove_listener(self, q: "_ThreadSafeLogQueue"):
+    def remove_listener(self, q: "_AsyncLogQueue"):
+        q.close()
         with self._lock:
             try:
                 self.listeners.remove(q)

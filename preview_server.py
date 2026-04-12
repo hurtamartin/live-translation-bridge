@@ -20,7 +20,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from dotenv import load_dotenv
 import uvicorn
+
+load_dotenv("config.env")
 
 app = FastAPI()
 
@@ -183,6 +186,7 @@ _perf_metrics = {
 }
 
 _translation_history: collections.deque = collections.deque(maxlen=50)
+_translation_paused = False
 
 def _update_audio_history():
     global _audio_level_db, _audio_level_peak
@@ -190,9 +194,9 @@ def _update_audio_history():
     _audio_level_db = -30 + 15 * math.sin(time.time() * 0.5) + random.uniform(-3, 3)
     _audio_level_peak = max(_audio_level_peak - 0.5, _audio_level_db)
     _audio_history.append({
-        "time": time.time(),
-        "rms_db": round(_audio_level_db, 1),
-        "peak_db": round(_audio_level_peak, 1),
+        "t": time.time(),
+        "db": round(_audio_level_db, 1),
+        "peak": round(_audio_level_peak, 1),
     })
 
 # --- Demo data ---
@@ -267,12 +271,27 @@ sessions: dict[str, ClientSession] = {}
 security = HTTPBasic()
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin")
+ALLOW_INSECURE_ADMIN = os.environ.get("ALLOW_INSECURE_ADMIN", "").lower() in {"1", "true", "yes"}
+WEAK_ADMIN_PASSWORDS = {"admin", "password", "change-me", "changeme", "replace-me"}
+INSECURE_ADMIN_CREDENTIALS = ADMIN_PASSWORD.lower() in WEAK_ADMIN_PASSWORDS
+ADMIN_WS_TOKEN_TTL = int(os.environ.get("ADMIN_WS_TOKEN_TTL", "3600"))
+ADMIN_WS_TOKEN_MAX = max(1, int(os.environ.get("ADMIN_WS_TOKEN_MAX", "1000")))
+_admin_ws_tokens: dict[str, float] = {}
+_admin_ws_tokens_lock = threading.Lock()
 
-if ADMIN_USERNAME == "admin" and ADMIN_PASSWORD == "admin":
-    logger.warning("Using default admin credentials — set ADMIN_USERNAME and ADMIN_PASSWORD env vars for production")
+if INSECURE_ADMIN_CREDENTIALS:
+    if ALLOW_INSECURE_ADMIN:
+        logger.warning("Using insecure admin credentials because ALLOW_INSECURE_ADMIN is enabled")
+    else:
+        logger.critical("Insecure admin credentials are disabled. Set ADMIN_USERNAME and a strong ADMIN_PASSWORD.")
 
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    if INSECURE_ADMIN_CREDENTIALS and not ALLOW_INSECURE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Insecure admin credentials are disabled. Set ADMIN_USERNAME and a strong ADMIN_PASSWORD.",
+        )
     correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
     correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
     if not (correct_username and correct_password):
@@ -284,13 +303,42 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials.username
 
 
+def _create_admin_ws_token() -> str:
+    token = secrets.token_urlsafe(32)
+    expires_at = time.time() + ADMIN_WS_TOKEN_TTL
+    with _admin_ws_tokens_lock:
+        now = time.time()
+        expired = [t for t, exp in _admin_ws_tokens.items() if exp < now]
+        for t in expired:
+            _admin_ws_tokens.pop(t, None)
+        _admin_ws_tokens[token] = expires_at
+        while len(_admin_ws_tokens) > ADMIN_WS_TOKEN_MAX:
+            _admin_ws_tokens.pop(next(iter(_admin_ws_tokens)))
+    return token
+
+
+def _is_valid_admin_ws_token(token: str) -> bool:
+    if not token:
+        return False
+    with _admin_ws_tokens_lock:
+        expires_at = _admin_ws_tokens.get(token)
+        if expires_at is None:
+            return False
+        if expires_at < time.time():
+            _admin_ws_tokens.pop(token, None)
+            return False
+        return True
+
+
 def _verify_ws_auth(websocket: WebSocket) -> bool:
     """Verify admin credentials for WebSocket connections.
 
     Checks Authorization header first (works for non-browser clients),
-    then falls back to ?token= query parameter (Base64-encoded user:pass)
+    then falls back to ?token= query parameter (short-lived bearer token)
     because browser WebSocket API does not support custom headers.
     """
+    if INSECURE_ADMIN_CREDENTIALS and not ALLOW_INSECURE_ADMIN:
+        return False
     # Try Authorization header first
     auth_header = websocket.headers.get("authorization", "")
     if auth_header.startswith("Basic "):
@@ -301,16 +349,10 @@ def _verify_ws_auth(websocket: WebSocket) -> bool:
                 return True
         except Exception:
             pass
-    # Fallback: ?token=base64(user:pass) for browser WebSocket
+    # Fallback: ?token=<short-lived bearer token> for browser WebSocket
     token = websocket.query_params.get("token", "")
-    if token:
-        try:
-            decoded = base64.b64decode(token).decode("utf-8")
-            username, password = decoded.split(":", 1)
-            if secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(password, ADMIN_PASSWORD):
-                return True
-        except Exception:
-            pass
+    if _is_valid_admin_ws_token(token):
+        return True
     return False
 
 
@@ -368,6 +410,11 @@ async def get(request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request, credentials: HTTPBasicCredentials = Depends(security)):
+    if INSECURE_ADMIN_CREDENTIALS and not ALLOW_INSECURE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Insecure admin credentials are disabled. Set ADMIN_USERNAME and a strong ADMIN_PASSWORD.",
+        )
     if not (secrets.compare_digest(credentials.username, ADMIN_USERNAME) and
             secrets.compare_digest(credentials.password, ADMIN_PASSWORD)):
         raise HTTPException(
@@ -375,7 +422,7 @@ async def admin_page(request: Request, credentials: HTTPBasicCredentials = Depen
             detail="Incorrect credentials",
             headers={"WWW-Authenticate": "Basic"},
         )
-    ws_token = base64.b64encode(f"{credentials.username}:{credentials.password}".encode()).decode()
+    ws_token = _create_admin_ws_token()
     return templates.TemplateResponse("admin.html", {"request": request, "ws_token": ws_token})
 
 @app.get("/api/status")
@@ -394,6 +441,7 @@ async def api_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)
             "audio_stream": {"status": "running", "device_name": "Preview (mock)", "channel": 0},
             "inference_executor": {"status": "running", "pending_tasks": 0},
         },
+        "translation_paused": _translation_paused,
         "config": dict(runtime_config),
     })
 
@@ -550,6 +598,18 @@ async def api_metrics(_user: str = Depends(verify_admin), _rl=Depends(rate_limit
 async def api_translations(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
     return JSONResponse(list(_translation_history))
 
+
+@app.post("/api/translation/toggle")
+async def api_translation_toggle(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
+    global _translation_paused
+    _translation_paused = not _translation_paused
+    return JSONResponse({"ok": True, "paused": _translation_paused})
+
+
+@app.get("/api/translation/status")
+async def api_translation_status(_user: str = Depends(verify_admin), _rl=Depends(rate_limit)):
+    return JSONResponse({"paused": _translation_paused})
+
 # --- Audio history ---
 
 @app.get("/api/audio-history")
@@ -584,6 +644,7 @@ async def api_status_ws(websocket: WebSocket):
                     "audio_stream": {"status": "running", "device_name": "Preview (mock)", "channel": 0},
                     "inference_executor": {"status": "running", "pending_tasks": 0},
                 },
+                "translation_paused": _translation_paused,
             }
             await websocket.send_text(json.dumps(payload))
             await asyncio.sleep(1)
@@ -662,6 +723,9 @@ async def demo_subtitles():
     idx = 0
     await asyncio.sleep(3)
     while True:
+        if _translation_paused:
+            await asyncio.sleep(1)
+            continue
         lang_sessions: dict[str, list[ClientSession]] = {}
         for s in list(sessions.values()):
             lang_sessions.setdefault(s.target_lang, []).append(s)
@@ -685,7 +749,7 @@ async def demo_subtitles():
             for lang in lang_sessions:
                 demos = DEMOS.get(lang, DEMOS["ces"])
                 _translation_history.appendleft({
-                    "timestamp": time.time(),
+                    "time": time.strftime("%H:%M:%S"),
                     "translations": {lang: demos[idx % len(demos)]},
                 })
 

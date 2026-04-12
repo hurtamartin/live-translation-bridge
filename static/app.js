@@ -19,12 +19,12 @@ function safeSetItem(key, value) {
 /* ========== Configuration ========== */
 
 const LANGUAGES = [
-  { code: 'ces', label: 'CZ', flag: '\u{1F1E8}\u{1F1FF}', name: '\u010Ce\u0161tina',   desc: 'Czech' },
-  { code: 'eng', label: 'EN', flag: '\u{1F1EC}\u{1F1E7}', name: 'English',  desc: 'English' },
-  { code: 'rus', label: 'RU', flag: '\u{1F1F7}\u{1F1FA}', name: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439', desc: 'Russian' },
-  { code: 'ukr', label: 'UA', flag: '\u{1F1FA}\u{1F1E6}', name: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', desc: 'Ukrainian' },
-  { code: 'deu', label: 'DE', flag: '\u{1F1E9}\u{1F1EA}', name: 'Deutsch',  desc: 'German' },
-  { code: 'spa', label: 'ES', flag: '\u{1F1EA}\u{1F1F8}', name: 'Español',  desc: 'Spanish' },
+  { code: 'ces', label: 'CZ', name: '\u010Ce\u0161tina', desc: 'Czech' },
+  { code: 'eng', label: 'EN', name: 'English', desc: 'English' },
+  { code: 'rus', label: 'RU', name: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439', desc: 'Russian' },
+  { code: 'ukr', label: 'UA', name: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430', desc: 'Ukrainian' },
+  { code: 'deu', label: 'DE', name: 'Deutsch', desc: 'German' },
+  { code: 'spa', label: 'ES', name: 'Español', desc: 'Spanish' },
 ];
 
 const TRANSLATIONS = {
@@ -225,13 +225,14 @@ const dom = {
   showQrLink: document.getElementById('showQrLink'),
   qrOverlay: document.getElementById('qrOverlay'),
   qrClose: document.getElementById('qrClose'),
+  pageUrl: document.getElementById('pageUrl'),
   header: document.getElementById('header'),
 };
 
 /* ========== Helpers ========== */
 
 function getLangInfo(code) {
-  return LANGUAGES.find(function(l) { return l.code === code; }) || { code: code, label: code.toUpperCase(), flag: '', name: code, desc: '' };
+  return LANGUAGES.find(function(l) { return l.code === code; }) || { code: code, label: code.toUpperCase(), name: code, desc: '' };
 }
 
 function t(key) {
@@ -578,9 +579,8 @@ function buildLanguageOptions() {
     btn.setAttribute('aria-label', lang.name + ' (' + lang.desc + ')');
 
     var flagSpan = document.createElement('span');
-    flagSpan.className = 'lang-option__flag';
+    flagSpan.className = 'lang-option__flag lang-option__flag--' + lang.code;
     flagSpan.setAttribute('aria-hidden', 'true');
-    flagSpan.textContent = lang.flag;
 
     var nameSpan = document.createElement('span');
     nameSpan.className = 'lang-option__name';
@@ -600,18 +600,29 @@ function buildLanguageOptions() {
 
 /* ========== Modal Helpers ========== */
 
+function getOverlayOpenClass(overlay) {
+  return overlay === dom.qrOverlay ? 'qr-overlay--open' : 'modal-overlay--open';
+}
+
+function getFocusableElements(container) {
+  return container.querySelectorAll(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  );
+}
+
 function openModal(overlay) {
   state.previousFocus = document.activeElement;
-  overlay.classList.add('modal-overlay--open');
+  overlay.classList.add(getOverlayOpenClass(overlay));
+  overlay.setAttribute('aria-hidden', 'false');
   // Focus first focusable element in the modal
-  var focusable = overlay.querySelector('button, [tabindex="0"], input, select, a');
+  var focusable = getFocusableElements(overlay)[0];
   if (focusable) {
     requestAnimationFrame(function() { focusable.focus(); });
   }
   // Install focus trap
   overlay._focusTrap = function(e) {
     if (e.key !== 'Tab') return;
-    var focusableEls = overlay.querySelectorAll('button, [tabindex="0"], input, select, a, [tabindex]:not([tabindex="-1"])');
+    var focusableEls = getFocusableElements(overlay);
     if (focusableEls.length === 0) return;
     var first = focusableEls[0];
     var last = focusableEls[focusableEls.length - 1];
@@ -631,7 +642,8 @@ function openModal(overlay) {
 }
 
 function closeModal(overlay) {
-  overlay.classList.remove('modal-overlay--open');
+  overlay.classList.remove(getOverlayOpenClass(overlay));
+  overlay.setAttribute('aria-hidden', 'true');
   // Remove focus trap
   if (overlay._focusTrap) {
     overlay.removeEventListener('keydown', overlay._focusTrap);
@@ -644,9 +656,9 @@ function closeModal(overlay) {
 }
 
 function getOpenOverlay() {
-  if (dom.langModal.classList.contains('modal-overlay--open')) return dom.langModal;
-  if (dom.settingsModal.classList.contains('modal-overlay--open')) return dom.settingsModal;
-  if (dom.qrOverlay.classList.contains('qr-overlay--open')) return dom.qrOverlay;
+  if (dom.langModal.classList.contains(getOverlayOpenClass(dom.langModal))) return dom.langModal;
+  if (dom.settingsModal.classList.contains(getOverlayOpenClass(dom.settingsModal))) return dom.settingsModal;
+  if (dom.qrOverlay.classList.contains(getOverlayOpenClass(dom.qrOverlay))) return dom.qrOverlay;
   return null;
 }
 
@@ -657,7 +669,9 @@ function initEventListeners() {
 
   dom.langFab.addEventListener('click', function() {
     document.querySelectorAll('.lang-option').forEach(function(btn) {
-      btn.classList.toggle('lang-option--active', btn.dataset.lang === state.language);
+      var isActive = btn.dataset.lang === state.language;
+      btn.classList.toggle('lang-option--active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
     });
     openModal(dom.langModal);
   });
@@ -709,20 +723,20 @@ function initEventListeners() {
   dom.showQrLink.addEventListener('click', function(e) {
     e.preventDefault();
     closeModal(dom.settingsModal);
-    dom.qrOverlay.classList.add('qr-overlay--open');
+    openModal(dom.qrOverlay);
   });
 
   dom.qrClose.addEventListener('click', function() {
-    dom.qrOverlay.classList.remove('qr-overlay--open');
+    closeModal(dom.qrOverlay);
   });
 
   if (window.location.hash === '#qr') {
-    dom.qrOverlay.classList.add('qr-overlay--open');
+    openModal(dom.qrOverlay);
   }
 
   window.addEventListener('hashchange', function() {
     if (window.location.hash === '#qr') {
-      dom.qrOverlay.classList.add('qr-overlay--open');
+      openModal(dom.qrOverlay);
     }
   });
 
@@ -738,7 +752,7 @@ function initEventListeners() {
       var overlay = getOpenOverlay();
       if (overlay) {
         if (overlay === dom.qrOverlay) {
-          dom.qrOverlay.classList.remove('qr-overlay--open');
+          closeModal(dom.qrOverlay);
         } else {
           closeModal(overlay);
         }
@@ -823,6 +837,8 @@ function registerServiceWorker() {
             // New version available — show update banner
             var banner = document.createElement('div');
             banner.className = 'update-banner';
+            banner.setAttribute('role', 'status');
+            banner.setAttribute('aria-live', 'polite');
             var span = document.createElement('span');
             span.textContent = t('updateAvailable');
             banner.appendChild(span);
@@ -891,6 +907,9 @@ function init() {
   setupAutoHide();
   setupOfflineDetection();
   registerServiceWorker();
+  if (dom.pageUrl) {
+    dom.pageUrl.textContent = window.location.origin;
+  }
   connect();
 
   // QR image fallback (moved from inline onerror for CSP compliance)

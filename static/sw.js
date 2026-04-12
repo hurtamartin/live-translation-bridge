@@ -1,15 +1,15 @@
 /* Service Worker - caches static assets for offline shell */
 'use strict';
 
-const CACHE_NAME = 'live-preklad-v3';
+const CACHE_NAME = 'live-preklad-v5';
 const STATIC_ASSETS = [
   '/',
   '/static/styles.css',
   '/static/app.js',
   '/static/manifest.json',
   '/static/assets/favicon.svg',
-  // Admin assets
-  '/admin',
+  '/static/assets/qr-placeholder.svg',
+  '/static/assets/flag-gb.svg',
   '/static/admin.css',
   '/static/admin.js',
 ];
@@ -34,6 +34,10 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/') || url.pathname === '/admin') {
+    return;
+  }
 
   // Network-first for HTML documents (always get fresh HTML)
   if (event.request.destination === 'document') {

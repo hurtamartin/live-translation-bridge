@@ -1,0 +1,20 @@
+[Unit]
+Description=Live Translation Bridge
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/live-translation-bridge
+EnvironmentFile=/opt/live-translation-bridge/config.env
+ExecStart=/opt/live-translation-bridge/venv/bin/python /opt/live-translation-bridge/app.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/live-translation-bridge
+
+[Install]
+WantedBy=multi-user.target
