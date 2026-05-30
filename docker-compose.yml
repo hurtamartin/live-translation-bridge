@@ -1,0 +1,69 @@
+# live-translation-bridge — Docker Compose
+#
+#   CPU:  docker compose --profile cpu up --build
+#   GPU:  docker compose --profile gpu up --build        (needs NVIDIA Container Toolkit on the host)
+#
+# Linux microphone passthrough (Linux host only) — add the override file:
+#   docker compose -f docker-compose.yml -f docker-compose.linux-audio.yml --profile cpu up --build
+#
+# On Windows/macOS the host microphone cannot be passed into the container
+# (Docker Desktop VM limitation). Use the native install for mic capture there,
+# or the browser streaming mode (AUDIO_SOURCE=network, /broadcast page).
+#
+# Set a strong admin password before exposing the admin panel, e.g.:
+#   ADMIN_PASSWORD=... docker compose --profile cpu up --build
+# (weak passwords like admin/change-me are rejected unless ALLOW_INSECURE_ADMIN=1)
+
+services:
+  app-cpu:
+    profiles: ["cpu"]
+    image: live-translation-bridge:cpu
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CUDA: "0"
+    ports:
+      - "8888:8888"
+    env_file:
+      # Optional: present in a normal local checkout, ignored if absent.
+      - path: config.env
+        required: false
+    environment:
+      # Compose-level override wins over config.env; leave unset to use config.env.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - model-cache:/models
+    restart: unless-stopped
+
+  app-gpu:
+    profiles: ["gpu"]
+    image: live-translation-bridge:gpu
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CUDA: "1"
+    ports:
+      - "8888:8888"
+    env_file:
+      - path: config.env
+        required: false
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - model-cache:/models
+    # Requires Docker Compose v2.30+. If unavailable, comment this out and use the
+    # deploy block below instead.
+    gpus: all
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  model-cache:

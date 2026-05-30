@@ -6,6 +6,7 @@ var ADMIN_TRANSLATIONS = {
   cs: {
     adminTitle: 'Administrace',
     mainPage: 'Hlavní stránka',
+    broadcastPage: 'Vysílat mikrofon',
     statusTitle: 'Stav',
     clients: 'Klienti',
     languages: 'Jazyky',
@@ -103,6 +104,7 @@ var ADMIN_TRANSLATIONS = {
   en: {
     adminTitle: 'Admin Panel',
     mainPage: 'Main Page',
+    broadcastPage: 'Broadcast mic',
     statusTitle: 'Status',
     clients: 'Clients',
     languages: 'Languages',

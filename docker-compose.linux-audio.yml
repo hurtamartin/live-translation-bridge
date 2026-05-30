@@ -1,0 +1,23 @@
+# Linux hosts ONLY — pass the host microphone (ALSA /dev/snd) into the container.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.linux-audio.yml --profile cpu up --build
+#   docker compose -f docker-compose.yml -f docker-compose.linux-audio.yml --profile gpu up --build
+#
+# Do not use this file on Windows/macOS: /dev/snd does not exist there and the
+# device mount would fail. Use browser streaming (AUDIO_SOURCE=network) instead.
+#
+# PulseAudio alternative (instead of /dev/snd): mount the Pulse socket and set
+# PULSE_SERVER. See the README "Docker > Audio on Linux" section.
+
+services:
+  app-cpu:
+    devices:
+      - "/dev/snd:/dev/snd"
+    group_add:
+      - "audio"
+
+  app-gpu:
+    devices:
+      - "/dev/snd:/dev/snd"
+    group_add:
+      - "audio"

@@ -1,0 +1,39 @@
+# Version control / IDE
+.git
+.gitignore
+.idea
+.vscode
+
+# Python caches and build artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments (local and the launch-script venv)
+venv/
+.venv/
+env/
+**/venv_preklad_kazani_AI/
+
+# Secrets and runtime state — must NOT be baked into the image
+config.env
+config.json
+.env
+
+# Docker artifacts (avoid recursive context)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Tooling / docs not needed at runtime
+.claude/
+tests/
+*.md
+run_translation.bat
+run_translation.sh
+uninstall.bat
+uninstall.sh

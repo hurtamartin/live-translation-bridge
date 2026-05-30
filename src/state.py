@@ -24,6 +24,14 @@ start_time = time.time()
 native_sample_rate = 16000
 resampler = None
 
+# Audio source: "device" (local microphone via sounddevice, default) or "network"
+# (browser pushes 16 kHz PCM into audio_queue over WebSocket — used for Docker on
+# Windows/macOS where the host mic cannot reach the container).
+audio_source = os.environ.get("AUDIO_SOURCE", "device").strip().lower()
+network_audio_lock = threading.Lock()
+network_audio_last_frame = 0.0      # wall-clock time of the last received frame
+network_producer_connected = False  # at most one browser producer at a time
+
 # Audio monitoring
 _audio_level_db = -60.0
 _audio_level_peak = -60.0

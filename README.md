@@ -158,6 +158,133 @@ chmod +x uninstall.sh
 
 The scripts will ask for confirmation before deleting anything. Source files are not removed.
 
+## Docker
+
+Docker is an **optional** alternative to the native install above — the native
+`python app.py` / launch-script workflow keeps working unchanged. A single
+parameterized `Dockerfile` builds either a CPU or a GPU image.
+
+### Quick start (CPU)
+
+Runs everywhere, including Windows/macOS Docker Desktop:
+
+```bash
+# Build + run (set a strong admin password)
+ADMIN_PASSWORD='your-strong-password' docker compose --profile cpu up --build
+```
+
+Then open `http://localhost:8888` (viewer) and `http://localhost:8888/admin`.
+
+Plain Docker without Compose:
+
+```bash
+docker build -t live-translation-bridge:cpu .
+docker run --rm -p 8888:8888 \
+  -e ADMIN_PASSWORD='your-strong-password' \
+  -v ltb-models:/models \
+  live-translation-bridge:cpu
+```
+
+### GPU (NVIDIA + Linux host)
+
+Requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+on the host. The PyTorch CUDA wheels bundle the CUDA runtime, so no `nvidia/cuda`
+base image is needed.
+
+```bash
+docker compose --profile gpu up --build
+# or:
+docker build --build-arg CUDA=1 -t live-translation-bridge:gpu .
+docker run --rm --gpus all -p 8888:8888 \
+  -e ADMIN_PASSWORD='your-strong-password' \
+  -v ltb-models:/models \
+  live-translation-bridge:gpu
+```
+
+The GPU build defaults to the CUDA 12.8 wheels (`cu128`, which match torch 2.11.0).
+For a different CUDA version:
+`docker build --build-arg CUDA=1 --build-arg CUDA_INDEX_URL=https://download.pytorch.org/whl/cu126 ...`
+
+> **macOS GPU (MPS) is not available in containers** (no Metal passthrough) — a
+> Mac container always runs on CPU. Use the native install for MPS acceleration.
+
+### Audio input
+
+The app captures a **local microphone** via PortAudio. How that reaches the
+container depends on the host OS:
+
+| Host | Microphone into container | How |
+|------|---------------------------|-----|
+| **Linux** | ✅ Yes | ALSA device passthrough or PulseAudio socket (below) |
+| **Windows / macOS** | ❌ No (Docker Desktop VM limit) | Use **browser streaming** below, or the native install |
+
+**Audio on Linux (ALSA):**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.linux-audio.yml --profile cpu up --build
+```
+
+This passes `/dev/snd` into the container and adds the `audio` group.
+
+**Audio on Linux (PulseAudio alternative):** mount the Pulse socket and cookie and
+set `PULSE_SERVER`, e.g. `-v ${XDG_RUNTIME_DIR}/pulse:/run/pulse -e PULSE_SERVER=unix:/run/pulse/native`.
+
+**Browser streaming (any OS — Windows/macOS too):** set `AUDIO_SOURCE=network`,
+open `http://localhost:8888/broadcast` (admin-authenticated), allow microphone
+access, and the browser captures the mic and streams 16 kHz PCM to the server
+over WebSocket. No host audio device is needed.
+
+```bash
+ADMIN_PASSWORD='...' AUDIO_SOURCE=network docker compose --profile cpu up --build
+# open http://localhost:8888/broadcast on the machine with the microphone
+```
+
+> When using browser streaming, audio frames travel over the viewer WebSocket
+> path; if you change the broadcast frame size, keep it under `WS_MAX_SIZE`
+> (default 2048 bytes) or raise that env var.
+
+### Model cache
+
+First startup downloads ~2 GB (SeamlessM4T) + ~50 MB (Silero VAD). The compose
+files mount a named volume at `/models` (`HF_HOME`/`TORCH_HOME` point there) so the
+download persists across restarts. For air-gapped deployments, bake the models in
+at build time:
+
+```bash
+docker build --build-arg PREFETCH_MODELS=1 -t live-translation-bridge:cpu .
+```
+
+### Configuration & secrets
+
+- Environment variables are read from a `config.env` file if present (mounted via
+  `env_file`), or passed with `-e` / Compose `environment:`. The same variables as
+  the native install apply (see the table above).
+- **`config.env` and `config.json` are never baked into the image** (`.dockerignore`).
+- Set a strong `ADMIN_PASSWORD`. Weak values (`admin`, `change-me`, …) are rejected
+  with HTTP 503 unless `ALLOW_INSECURE_ADMIN=1` (development only).
+- Runtime tuning is saved to `/app/config.json` (ephemeral in the container). To
+  persist device/tuning changes across container recreation, bind-mount it:
+  `-v "$(pwd)/config.json:/app/config.json"`.
+
+### Health checks
+
+- `GET /health` — always HTTP 200 while the process is alive (used by the image
+  `HEALTHCHECK` as a liveness probe).
+- `GET /ready` — HTTP 200 only when model, audio source, broadcaster and processing
+  thread are all healthy (use this for orchestrator readiness probes). In a
+  no-audio container `/ready` stays 503 until an audio source (device passthrough or
+  browser stream) is active.
+
+### Build args
+
+| Arg | Default | Purpose |
+|-----|---------|---------|
+| `CUDA` | `0` | `1` installs the GPU PyTorch wheel (run with `--gpus all`) |
+| `TORCH_INDEX_URL` | *(empty)* | Force a pip index for torch in any build (overrides the CPU/CUDA defaults) |
+| `CUDA_INDEX_URL` | `…/whl/cu128` | CUDA wheel index used when `CUDA=1` |
+| `TORCH_VERSION` / `TORCHAUDIO_VERSION` | `2.11.0` | PyTorch versions to install |
+| `PREFETCH_MODELS` | `0` | `1` bakes the AI models into the image for offline startup |
+
 ## Configuration
 
 All parameters can be adjusted at runtime via the admin panel (`/admin`):

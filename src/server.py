@@ -31,6 +31,8 @@ RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "10"))  # requests per win
 RATE_LIMIT_WINDOW = 1.0  # seconds
 _RATE_LIMIT_MAX_ENTRIES = 5000
 MAX_JSON_BODY_BYTES = int(os.environ.get("MAX_JSON_BODY_BYTES", "65536"))
+# Seconds without a network audio frame before the source counts as down (AUDIO_SOURCE=network)
+NETWORK_AUDIO_TIMEOUT = float(os.environ.get("NETWORK_AUDIO_TIMEOUT", "10"))
 
 
 def _check_rate_limit(client_ip: str) -> bool:
@@ -227,6 +229,29 @@ async def admin_page(request: Request, credentials: HTTPBasicCredentials = Depen
     # Generate short-lived bearer token for browser WebSocket connections.
     ws_token = _create_admin_ws_token()
     return templates.TemplateResponse("admin.html", {"request": request, "ws_token": ws_token})
+
+
+@app.get("/broadcast", response_class=HTMLResponse)
+async def broadcast_page(request: Request, credentials: HTTPBasicCredentials = Depends(security)):
+    """Admin-only page that captures the local microphone in the browser and
+    streams it to /api/audio/ingest (used when AUDIO_SOURCE=network)."""
+    if INSECURE_ADMIN_CREDENTIALS and not ALLOW_INSECURE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Insecure admin credentials are disabled. Set ADMIN_USERNAME and a strong ADMIN_PASSWORD.",
+        )
+    if not (secrets.compare_digest(credentials.username, ADMIN_USERNAME) and
+            secrets.compare_digest(credentials.password, ADMIN_PASSWORD)):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    ws_token = _create_admin_ws_token()
+    return templates.TemplateResponse(
+        "broadcast.html",
+        {"request": request, "ws_token": ws_token, "audio_source": state.audio_source},
+    )
 
 
 # --- API ENDPOINTS ---
@@ -487,8 +512,13 @@ async def api_config_import(request: Request, _user: str = Depends(verify_admin)
 
 
 def _health_payload() -> dict:
-    with state.audio_stream_lock:
-        audio_ok = state.audio_stream is not None and state.audio_stream.active
+    if state.audio_source == "network":
+        with state.network_audio_lock:
+            last_frame = state.network_audio_last_frame
+        audio_ok = (time.time() - last_frame) < NETWORK_AUDIO_TIMEOUT
+    else:
+        with state.audio_stream_lock:
+            audio_ok = state.audio_stream is not None and state.audio_stream.active
     model_ok = state.processor is not None and state.model is not None
     thread_ok = state.processing_thread is not None and state.processing_thread.is_alive()
     broadcaster_ok = state.broadcaster_task is not None and not state.broadcaster_task.done()
@@ -733,6 +763,52 @@ async def api_logs_ws(websocket: WebSocket):
         logger.debug(f"Log websocket closed: {e}")
     finally:
         log_handler.remove_listener(listener)
+
+
+@app.websocket("/api/audio/ingest")
+async def api_audio_ingest(websocket: WebSocket):
+    """Receive 16 kHz mono Int16 PCM from a browser and feed it into the pipeline.
+
+    Active only when AUDIO_SOURCE=network. Admin-authenticated (it controls the
+    broadcast audio). At most one producer may stream at a time. Frames are pushed
+    into state.audio_queue exactly like the sounddevice callback would.
+    """
+    if state.audio_source != "network":
+        await websocket.close(code=4400)  # ingest disabled outside network mode
+        return
+    if not _verify_ws_auth(websocket):
+        await websocket.close(code=4401)
+        return
+    with state.network_audio_lock:
+        if state.network_producer_connected:
+            await websocket.close(code=4409)  # another producer is already streaming
+            return
+        state.network_producer_connected = True
+    await websocket.accept()
+    logger.info("Audio ingest producer connected")
+    try:
+        while True:
+            data = await websocket.receive_bytes()
+            if not data:
+                continue
+            try:
+                samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+            except ValueError:
+                continue  # malformed frame (odd byte count) — skip
+            try:
+                state.audio_queue.put_nowait(samples.reshape(-1))
+            except queue.Full:
+                state.increment_metric("audio_queue_drops")
+            with state.network_audio_lock:
+                state.network_audio_last_frame = time.time()
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug(f"Audio ingest closed: {e}")
+    finally:
+        with state.network_audio_lock:
+            state.network_producer_connected = False
+        logger.info("Audio ingest producer disconnected")
 
 
 @app.websocket("/ws")
@@ -1154,19 +1230,28 @@ def start_server():
 
     cfg = get_config_snapshot()
     device_idx = cfg["audio_device_index"]
-    try:
-        restart_audio_stream(device_idx, cfg["audio_channel"], state)
-    except Exception as e:
-        logger.error(f"Initial audio stream failed: {e} — will retry via watchdog")
+    if state.audio_source == "network":
+        # Audio arrives from a browser over /api/audio/ingest as 16 kHz mono PCM,
+        # so no local device/resampler is used.
+        state.native_sample_rate = 16000
+        state.resampler = None
+        logger.info("AUDIO_SOURCE=network: local audio device disabled; awaiting browser stream at /broadcast")
+    else:
+        try:
+            restart_audio_stream(device_idx, cfg["audio_channel"], state)
+        except Exception as e:
+            logger.error(f"Initial audio stream failed: {e} — will retry via watchdog")
 
     @app.on_event("startup")
     async def startup_event():
         loop = asyncio.get_running_loop()
         state.broadcaster_task = asyncio.create_task(broadcaster())
         state.audio_ticker_task = asyncio.create_task(audio_history_ticker())
-        # Audio watchdog runs in its own thread (uses blocking wait/sleep)
-        state.watchdog_thread = threading.Thread(target=audio_watchdog, daemon=False)
-        state.watchdog_thread.start()
+        # Audio watchdog runs in its own thread (uses blocking wait/sleep).
+        # Not needed in network mode — there is no local device to reconnect.
+        if state.audio_source != "network":
+            state.watchdog_thread = threading.Thread(target=audio_watchdog, daemon=False)
+            state.watchdog_thread.start()
         # Processing thread — NOT daemon, coordinated shutdown via stop_event
         state.processing_thread = threading.Thread(target=processing_loop, args=(loop,))
         state.processing_thread.start()
