@@ -208,13 +208,13 @@ const TRANSLATIONS = {
         "updateReload": "Újratöltés"
     },
     "pes": {
-        "waitingForTranslation": "در انتظار ترجمه...",
-        "switchingLanguage": "در حال تغییر زبان...",
-        "connecting": "در حال اتصال...",
+        "waitingForTranslation": "...در انتظار ترجمه",
+        "switchingLanguage": "...در حال تغییر زبان",
+        "connecting": "...در حال اتصال",
         "live": "زنده",
         "disconnected": "قطع اتصال",
         "disconnectedTimer": "قطع اتصال ({0}s)",
-        "connectionError": "اتصال قطع شد. اتصال مجدد در {0} ثانیه...",
+        "connectionError": "...اتصال قطع شد. اتصال مجدد در {0} ثانیه",
         "selectLanguage": "انتخاب زبان",
         "close": "بستن",
         "settings": "تنظیمات",
