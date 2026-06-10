@@ -42,7 +42,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 DEFAULT_TARGET_LANG = "ces"
-SUPPORTED_LANGUAGES = {"ces", "eng", "rus", "ukr", "deu", "spa"}
+SUPPORTED_LANGUAGES = {"ces", "eng", "rus", "ukr", "deu", "spa", "pol", "hun", "pes"}
 MAX_CLIENTS = 200
 start_time = time.time()
 
@@ -208,7 +208,7 @@ DEMOS = {
         "Toto je ukázka, jak budou titulky vypadat.",
         "Prosím, zapněte si titulky ve svém jazyce.",
         "Děkujeme za vaši účast.",
-        "Nyní přejdeme k hlavnímu bodu programu.",
+        "Nyní přejdeme k hlavnímu bodu programu."
     ],
     "eng": [
         "Welcome to today's gathering.",
@@ -217,16 +217,16 @@ DEMOS = {
         "This is how the subtitles will look.",
         "Please turn on subtitles in your language.",
         "Thank you for your participation.",
-        "Now we move to the main point of the agenda.",
+        "Now we move to the main point of the agenda."
     ],
     "rus": [
-        "\u0414\u043E\u0431\u0440\u043E \u043F\u043E\u0436\u0430\u043B\u043E\u0432\u0430\u0442\u044C \u043D\u0430 \u0441\u0435\u0433\u043E\u0434\u043D\u044F\u0448\u043D\u0435\u0435 \u0441\u043E\u0431\u0440\u0430\u043D\u0438\u0435.",
-        "\u042D\u0442\u043E \u043F\u0440\u0438\u043C\u0435\u0440 \u043F\u0435\u0440\u0435\u0432\u0435\u0434\u0451\u043D\u043D\u043E\u0433\u043E \u0442\u0435\u043A\u0441\u0442\u0430.",
-        "\u0421\u0435\u0433\u043E\u0434\u043D\u044F \u043C\u044B \u0431\u0443\u0434\u0435\u043C \u0433\u043E\u0432\u043E\u0440\u0438\u0442\u044C \u043E \u0432\u0430\u0436\u043D\u043E\u0439 \u0442\u0435\u043C\u0435.",
-        "\u0422\u0430\u043A \u0431\u0443\u0434\u0443\u0442 \u0432\u044B\u0433\u043B\u044F\u0434\u0435\u0442\u044C \u0441\u0443\u0431\u0442\u0438\u0442\u0440\u044B.",
-        "\u041F\u043E\u0436\u0430\u043B\u0443\u0439\u0441\u0442\u0430, \u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435 \u0441\u0443\u0431\u0442\u0438\u0442\u0440\u044B \u043D\u0430 \u0441\u0432\u043E\u0451\u043C \u044F\u0437\u044B\u043A\u0435.",
-        "\u0421\u043F\u0430\u0441\u0438\u0431\u043E \u0437\u0430 \u0432\u0430\u0448\u0435 \u0443\u0447\u0430\u0441\u0442\u0438\u0435.",
-        "\u0422\u0435\u043F\u0435\u0440\u044C \u043F\u0435\u0440\u0435\u0439\u0434\u0451\u043C \u043A \u0433\u043B\u0430\u0432\u043D\u043E\u043C\u0443 \u043F\u0443\u043D\u043A\u0442\u0443 \u043F\u043E\u0432\u0435\u0441\u0442\u043A\u0438 \u0434\u043D\u044F.",
+        "Добро пожаловать на сегодняшнее собрание.",
+        "Это пример переведённого текста.",
+        "Сегодня мы будем говорить о важной теме.",
+        "Так будут выглядеть субтитры.",
+        "Пожалуйста, включите субтитры на своём языке.",
+        "Спасибо за ваше участие.",
+        "Теперь перейдём к главному пункту повестки дня."
     ],
     "ukr": [
         "Ласкаво просимо на сьогоднішнє зібрання.",
@@ -235,7 +235,7 @@ DEMOS = {
         "Ось як виглядатимуть субтитри.",
         "Будь ласка, увімкніть субтитри своєю мовою.",
         "Дякуємо за вашу участь.",
-        "Тепер перейдемо до головного пункту порядку денного.",
+        "Тепер перейдемо до головного пункту порядку денного."
     ],
     "deu": [
         "Willkommen bei der heutigen Versammlung.",
@@ -244,17 +244,44 @@ DEMOS = {
         "So werden die Untertitel aussehen.",
         "Bitte schalten Sie die Untertitel in Ihrer Sprache ein.",
         "Vielen Dank für Ihre Teilnahme.",
-        "Jetzt kommen wir zum Hauptpunkt der Tagesordnung.",
+        "Jetzt kommen wir zum Hauptpunkt der Tagesordnung."
     ],
     "spa": [
-        "Bienvenidos a la reuni\u00f3n de hoy.",
+        "Bienvenidos a la reunión de hoy.",
         "Este es un ejemplo de texto traducido.",
         "Hoy hablaremos sobre un tema importante.",
-        "As\u00ed se ver\u00e1n los subt\u00edtulos.",
-        "Por favor, active los subt\u00edtulos en su idioma.",
-        "Gracias por su participaci\u00f3n.",
-        "Ahora pasamos al punto principal de la agenda.",
+        "Así se verán los subtítulos.",
+        "Por favor, active los subtítulos en su idioma.",
+        "Gracias por su participación.",
+        "Ahora pasamos al punto principal de la agenda."
     ],
+    "pol": [
+        "Witamy na dzisiejszym spotkaniu.",
+        "To jest przykład przetłumaczonego tekstu.",
+        "Dzisiaj porozmawiamy o ważnym temacie.",
+        "Tak będą wyglądać napisy.",
+        "Proszę włączyć napisy w swoim języku.",
+        "Dziękujemy za udział.",
+        "Przechodzimy teraz do głównego punktu programu."
+    ],
+    "hun": [
+        "Üdvözlünk a mai összejövetelen.",
+        "Ez egy példa a lefordított szövegre.",
+        "Ma egy fontos témáról fogunk beszélni.",
+        "Így fognak kinézni a feliratok.",
+        "Kérjük, kapcsolja be a feliratokat az Ön nyelvén.",
+        "Köszönjük a részvételt.",
+        "Most pedig a napirend fő pontjára térünk át."
+    ],
+    "pes": [
+        "به گردهمایی امروز خوش آمدید.",
+        "این نمونه‌ای از متن ترجمه شده است.",
+        "امروز درباره یک موضوع مهم صحبت خواهیم کرد.",
+        "زیرنویس‌ها به این شکل خواهند بود.",
+        "لطفاً زیرنویس‌ها را به زبان خودتان فعال کنید.",
+        "از مشارکت شما متشکریم.",
+        "حالا به سراغ نکته اصلی دستور جلسه می‌رویم."
+    ]
 }
 
 @dataclass

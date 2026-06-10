@@ -5,14 +5,14 @@ Real-time speech translation system that captures audio from a microphone, trans
 ## Features
 
 - **Real-time speech-to-text translation** using `facebook/seamless-m4t-v2-large`
-- **6 target languages**: Czech, English, Russian, Ukrainian, German, Spanish
+- **9 target languages**: Czech, English, Russian, Ukrainian, German, Spanish, Polish, Hungarian, Persian
 - **Per-client language selection** — each viewer picks their own language
 - **Silero VAD** for accurate voice activity detection
 - **Audio resampling** — works with any device sample rate (auto-resamples to 16kHz)
 - **Audio preprocessing** — noise gate, normalization, high-pass filter
 - **Admin panel** (`/admin`) — device selection, parameter tuning, VU meter, real-time log with level filtering
 - **Persistent configuration** — settings saved to `config.json`, restored on restart with validation
-- **Internationalized UI** — viewer in 6 languages, admin panel in Czech/English
+- **Internationalized UI** — viewer in 9 languages, admin panel in Czech/English
 - **PWA support** — installable on mobile devices, SW update notifications
 - **Dark/Light theme** with auto-detection
 - **GPU acceleration** — CUDA, MPS (Apple Silicon), or CPU fallback
@@ -200,6 +200,9 @@ Higher values produce more accurate translations because the model considers mor
 | `ukr` | Ukrainian |
 | `deu` | German |
 | `spa` | Spanish |
+| `pol` | Polish |
+| `hun` | Hungarian |
+| `pes` | Persian |
 
 ## Architecture
 
