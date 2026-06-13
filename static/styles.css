@@ -515,6 +515,18 @@ body {
   background: linear-gradient(to bottom, #aa151b 0 25%, #f1bf00 25% 75%, #aa151b 75% 100%);
 }
 
+.lang-option__flag--pol {
+  background: linear-gradient(to bottom, #ffffff 0 50%, #dc143c 50% 100%);
+}
+
+.lang-option__flag--hun {
+  background: linear-gradient(to bottom, #cd2a3e 0 33.33%, #ffffff 33.33% 66.66%, #436f4d 66.66% 100%);
+}
+
+.lang-option__flag--pes {
+  background: linear-gradient(to bottom, #239f40 0 33.33%, #ffffff 33.33% 66.66%, #da251d 66.66% 100%);
+}
+
 .lang-option__name {
   font-size: 16px;
   font-weight: 600;

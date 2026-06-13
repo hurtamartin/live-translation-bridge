@@ -26,7 +26,7 @@ DEFAULT_CONFIG = {
 
 CONFIG_FILE = Path(__file__).parent.parent / "config.json"
 
-SUPPORTED_LANGUAGES = {"ces", "eng", "rus", "ukr", "deu", "spa"}
+SUPPORTED_LANGUAGES = {"ces", "eng", "rus", "ukr", "deu", "spa", "pol", "hun", "pes"}
 FIXED_CONFIG_VALUES = {
     # The audio pipeline, Silero VAD and SeamlessM4T inference path are wired
     # around 16 kHz model audio. Device native sample rate is handled separately.
